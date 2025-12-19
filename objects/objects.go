@@ -14,7 +14,10 @@
 //
 // SecureString provides encrypted string storage for sensitive data:
 //
-//	ss := objects.NewSecureString("secret")
+//	ss, err := objects.NewSecureString("secret")
+//	if err != nil {
+//		return err
+//	}
 //	defer ss.Clear() // Clear from memory when done
 //
 // # ErrorRecord
@@ -36,6 +39,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"fmt"
 	"io"
 )
 
@@ -68,32 +72,34 @@ type SecureString struct {
 }
 
 // NewSecureString creates a SecureString from plaintext.
-func NewSecureString(plaintext string) *SecureString {
+// Returns an error if cryptographic operations fail.
+func NewSecureString(plaintext string) (*SecureString, error) {
 	ss := &SecureString{}
 	ss.key = make([]byte, 32)
+
+	// Generate random encryption key
 	if _, err := io.ReadFull(rand.Reader, ss.key); err != nil {
-		// Fallback for testing - not secure!
-		copy(ss.key, []byte("00000000000000000000000000000000"))
+		return nil, fmt.Errorf("failed to generate encryption key: %w", err)
 	}
 
 	// Encrypt the plaintext
 	block, err := aes.NewCipher(ss.key)
 	if err != nil {
-		return ss
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return ss
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return ss
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
 	ss.encrypted = gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return ss
+	return ss, nil
 }
 
 // Decrypt returns the plaintext value.

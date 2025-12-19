@@ -161,7 +161,7 @@ type NullHostUI struct{}
 
 func (ui *NullHostUI) ReadLine() (string, error) { return "", nil }
 func (ui *NullHostUI) ReadLineAsSecureString() (*objects.SecureString, error) {
-	return objects.NewSecureString(""), nil
+	return objects.NewSecureString("")
 }
 func (ui *NullHostUI) Write(text string)                                    {}
 func (ui *NullHostUI) WriteLine(text string)                                {}

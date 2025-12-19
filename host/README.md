@@ -135,7 +135,7 @@ func (ui *InteractiveHostUI) ReadLineAsSecureString() (*objects.SecureString, er
     // In production, use terminal.ReadPassword for secure input
     fmt.Print("Password: ")
     if ui.scanner.Scan() {
-        return objects.NewSecureString(ui.scanner.Text()), nil
+        return objects.NewSecureString(ui.scanner.Text())
     }
     return nil, ui.scanner.Err()
 }
@@ -203,7 +203,11 @@ func (ui *InteractiveHostUI) PromptForCredential(caption, message, userName, tar
         password = ui.scanner.Text()
     }
 
-    return objects.NewPSCredential(user, objects.NewSecureString(password)), nil
+    securePass, err := objects.NewSecureString(password)
+    if err != nil {
+        return nil, err
+    }
+    return objects.NewPSCredential(user, securePass), nil
 }
 
 func (ui *InteractiveHostUI) PromptForChoice(caption, message string, choices []host.ChoiceDescription, defaultChoice int) (int, error) {

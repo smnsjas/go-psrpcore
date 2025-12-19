@@ -46,6 +46,7 @@ package fragments
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 // Fragment header size in bytes.
@@ -182,7 +183,9 @@ func (f *Fragmenter) Fragment(data []byte) ([]*Fragment, error) {
 
 // Assembler reassembles fragments into complete messages.
 type Assembler struct {
-	pending map[uint64]*pendingMessage
+	pending            map[uint64]*pendingMessage
+	maxPendingMessages int // Maximum number of pending messages (DoS protection)
+	maxFragmentsPerMsg int // Maximum fragments per message (DoS protection)
 }
 
 type pendingMessage struct {
@@ -191,23 +194,52 @@ type pendingMessage struct {
 	received  int
 }
 
-// NewAssembler creates a new Assembler.
+const (
+	// DefaultMaxPendingMessages is the default limit for concurrent pending messages
+	DefaultMaxPendingMessages = 1000
+	// DefaultMaxFragmentsPerMsg is the default limit for fragments per message
+	DefaultMaxFragmentsPerMsg = 10000
+)
+
+// NewAssembler creates a new Assembler with default limits.
 func NewAssembler() *Assembler {
 	return &Assembler{
-		pending: make(map[uint64]*pendingMessage),
+		pending:            make(map[uint64]*pendingMessage),
+		maxPendingMessages: DefaultMaxPendingMessages,
+		maxFragmentsPerMsg: DefaultMaxFragmentsPerMsg,
+	}
+}
+
+// NewAssemblerWithLimits creates a new Assembler with custom limits.
+func NewAssemblerWithLimits(maxPending, maxFragments int) *Assembler {
+	return &Assembler{
+		pending:            make(map[uint64]*pendingMessage),
+		maxPendingMessages: maxPending,
+		maxFragmentsPerMsg: maxFragments,
 	}
 }
 
 // Add adds a fragment and returns true if the message is complete.
-// If complete, the assembled message data is returned.
+// If complete, the assembled message data is returned and the message is removed from pending.
 func (a *Assembler) Add(f *Fragment) (complete bool, data []byte, err error) {
 	pm, exists := a.pending[f.ObjectID]
 	if !exists {
+		// DoS protection: limit concurrent pending messages
+		if len(a.pending) >= a.maxPendingMessages {
+			return false, nil, fmt.Errorf("too many pending messages: %d >= %d", len(a.pending), a.maxPendingMessages)
+		}
+
 		pm = &pendingMessage{
 			fragments: make(map[uint64][]byte),
 			total:     -1,
 		}
 		a.pending[f.ObjectID] = pm
+	}
+
+	// DoS protection: limit fragments per message
+	if pm.received >= a.maxFragmentsPerMsg {
+		delete(a.pending, f.ObjectID) // Clean up to prevent leak
+		return false, nil, fmt.Errorf("too many fragments for message %d: %d >= %d", f.ObjectID, pm.received, a.maxFragmentsPerMsg)
 	}
 
 	if _, dup := pm.fragments[f.FragmentID]; dup {
@@ -228,8 +260,11 @@ func (a *Assembler) Add(f *Fragment) (complete bool, data []byte, err error) {
 		for i := uint64(0); i < uint64(pm.total); i++ {
 			result = append(result, pm.fragments[i]...)
 		}
-		// Don't delete from pending - leave it to detect duplicates
-		// The caller should create a new Assembler for each session
+
+		// CRITICAL FIX: Delete completed message to prevent memory leak
+		// Duplicate detection is handled by TCP layer in most transports
+		delete(a.pending, f.ObjectID)
+
 		return true, result, nil
 	}
 

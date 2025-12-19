@@ -50,6 +50,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/google/uuid"
@@ -375,12 +376,12 @@ func (p *Pool) sendSessionCapability(ctx context.Context) error {
 	capabilityData := []byte(`<Obj RefId="0">
   <MS>
     <Version N="protocolversion">2.3</Version>
-    <Version N="PSVersion">5.1.0.0</Version>
+    <Version N="PSVersion">2.0</Version>
     <Version N="SerializationVersion">1.1.0.1</Version>
   </MS>
 </Obj>`)
 
-	msg := messages.NewSessionCapability(p.id, capabilityData)
+	msg := messages.NewSessionCapability(uuid.Nil, capabilityData)
 	return p.sendMessage(ctx, msg)
 }
 
@@ -425,15 +426,55 @@ func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 	p.mu.RLock()
 	minRunspaces := p.minRunspaces
 	maxRunspaces := p.maxRunspaces
+	h := p.host
 	p.mu.RUnlock()
 
-	// TODO: Build proper initialization data with min/max runspaces, thread options, etc.
-	initData := []byte(fmt.Sprintf(`<Obj RefId="0">
-  <MS>
-    <I32 N="MinRunspaces">%d</I32>
-    <I32 N="MaxRunspaces">%d</I32>
-  </MS>
-</Obj>`, minRunspaces, maxRunspaces))
+	// Create HostInfo object
+	hostInfo := &serialization.PSObject{
+		TypeNames:  []string{"System.Management.Automation.Remoting.RemoteHostInfo"},
+		Properties: make(map[string]interface{}),
+	}
+	if h != nil {
+		hostInfo.Properties["_hostName"] = h.GetName()
+		v := h.GetVersion()
+		hostInfo.Properties["_hostVersion"] = objects.Version{
+			Major:    v.Major,
+			Minor:    v.Minor,
+			Build:    v.Build,
+			Revision: v.Revision,
+		}
+		hostInfo.Properties["_hostInstanceId"] = uuid.New() // Emits <G> tag
+		hostInfo.Properties["_hostDefaultCulture"] = h.GetCurrentCulture()
+		hostInfo.Properties["_hostDefaultUICulture"] = h.GetCurrentUICulture()
+		hostInfo.Properties["_isHostNull"] = false
+		hostInfo.Properties["_isHostUINull"] = false // UI() is available
+		hostInfo.Properties["_isHostRawUINull"] = true
+		hostInfo.Properties["_isHostUseInteractive"] = false // Batch mode
+	} else {
+		hostInfo.Properties["_isHostNull"] = true
+	}
+
+	// Construct the Main Initialization Object
+	initObj := &serialization.PSObject{
+		TypeNames:  []string{"System.Management.Automation.Runspaces.RunspacePoolInitInfo"},
+		Properties: make(map[string]interface{}),
+	}
+	initObj.Properties["MinRunspaces"] = int32(minRunspaces)
+	initObj.Properties["MaxRunspaces"] = int32(maxRunspaces)
+	initObj.Properties["PSThreadOptions"] = int32(0) // Default
+	initObj.Properties["ApartmentState"] = int32(2)  // MTA
+	initObj.Properties["HostInfo"] = hostInfo
+	initObj.Properties["ApplicationArguments"] = make(map[string]interface{})
+	initObj.Properties["ApplicationPrivateData"] = make(map[string]interface{})
+
+	// Serialize
+	ser := serialization.NewSerializer()
+	initData, err := ser.Serialize(initObj)
+	if err != nil {
+		return fmt.Errorf("serialize init data: %w", err)
+	}
+
+	log.Printf("INIT PAYLOAD:\n%s", string(initData))
 
 	msg := messages.NewInitRunspacePool(p.id, initData)
 	return p.sendMessage(ctx, msg)
@@ -702,6 +743,7 @@ func (p *Pool) receiveMessage(ctx context.Context) (*messages.Message, error) {
 		if _, err := io.ReadFull(p.transport, header); err != nil {
 			return nil, fmt.Errorf("read fragment header: %w", err)
 		}
+		log.Printf("RECV FRAG HEADER: %x", header)
 
 		// Read blob data
 		// The blob length is at offset 17 in the header (big-endian)
@@ -728,6 +770,7 @@ func (p *Pool) receiveMessage(ctx context.Context) (*messages.Message, error) {
 		}
 
 		if complete {
+			log.Printf("MSG COMPLETE (%d bytes)", len(msgData))
 			// Decode message
 			msg, err := messages.Decode(msgData)
 			if err != nil {

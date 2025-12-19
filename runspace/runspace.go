@@ -56,6 +56,7 @@ import (
 	"github.com/jasonmfehr/go-psrp/fragments"
 	"github.com/jasonmfehr/go-psrp/host"
 	"github.com/jasonmfehr/go-psrp/messages"
+	"github.com/jasonmfehr/go-psrp/serialization"
 )
 
 var (
@@ -126,6 +127,12 @@ type Pool struct {
 	// Protocol state
 	fragmenter *fragments.Fragmenter
 	assembler  *fragments.Assembler
+
+	// Negotiated capabilities
+	serverProtocolVersion   string
+	serverPSVersion         string
+	negotiatedMaxRunspaces  int
+	negotiatedMinRunspaces  int
 
 	// Host callback handling
 	hostCallbackHandler *host.CallbackHandler
@@ -349,7 +356,28 @@ func (p *Pool) receiveSessionCapability(ctx context.Context) error {
 		return fmt.Errorf("expected SESSION_CAPABILITY, got %v", msg.Type)
 	}
 
-	// TODO: Parse and validate capability data
+	// Parse the capability data
+	caps, err := parseCapabilityData(msg.Data)
+	if err != nil {
+		return fmt.Errorf("parse capability data: %w", err)
+	}
+
+	// Validate protocol version
+	if caps.ProtocolVersion == "" {
+		return fmt.Errorf("server did not provide protocol version")
+	}
+
+	// Check if protocol version is compatible (we support 2.x)
+	if len(caps.ProtocolVersion) < 2 || caps.ProtocolVersion[0] != '2' {
+		return fmt.Errorf("incompatible protocol version: server=%s, client=2.3", caps.ProtocolVersion)
+	}
+
+	// Store negotiated capabilities
+	p.mu.Lock()
+	p.serverProtocolVersion = caps.ProtocolVersion
+	p.serverPSVersion = caps.PSVersion
+	p.mu.Unlock()
+
 	return nil
 }
 
@@ -383,9 +411,29 @@ func (p *Pool) waitForOpened(ctx context.Context) error {
 		return fmt.Errorf("expected RUNSPACEPOOL_STATE, got %v", msg.Type)
 	}
 
-	// TODO: Parse state from message data
-	// For now, assume it's Opened if we got the message
+	// Parse the state message
+	stateInfo, err := parseRunspacePoolState(msg.Data)
+	if err != nil {
+		return fmt.Errorf("parse runspace pool state: %w", err)
+	}
+
+	// Verify the state is Opened
+	if stateInfo.State != messages.RunspacePoolStateOpened {
+		return fmt.Errorf("expected state Opened, got %d", stateInfo.State)
+	}
+
+	// Store negotiated runspace counts if provided
 	p.mu.Lock()
+	if stateInfo.MinRunspaces > 0 {
+		p.negotiatedMinRunspaces = stateInfo.MinRunspaces
+	} else {
+		p.negotiatedMinRunspaces = p.minRunspaces
+	}
+	if stateInfo.MaxRunspaces > 0 {
+		p.negotiatedMaxRunspaces = stateInfo.MaxRunspaces
+	} else {
+		p.negotiatedMaxRunspaces = p.maxRunspaces
+	}
 	p.setState(StateOpened)
 	p.mu.Unlock()
 
@@ -529,4 +577,92 @@ func (p *Pool) receiveMessageWithHostCallbacks(ctx context.Context) (*messages.M
 		// Not a host call, return the message
 		return msg, nil
 	}
+}
+
+// capabilityData represents parsed SESSION_CAPABILITY data.
+type capabilityData struct {
+	ProtocolVersion      string
+	PSVersion            string
+	SerializationVersion string
+}
+
+// parseCapabilityData parses the CLIXML capability data from a SESSION_CAPABILITY message.
+func parseCapabilityData(data []byte) (*capabilityData, error) {
+	deser := serialization.NewDeserializer()
+	objs, err := deser.Deserialize(data)
+	if err != nil {
+		return nil, fmt.Errorf("deserialize capability data: %w", err)
+	}
+
+	if len(objs) == 0 {
+		return nil, fmt.Errorf("no capability object in message")
+	}
+
+	// The capability should be a PSObject with properties
+	psObj, ok := objs[0].(*serialization.PSObject)
+	if !ok {
+		return nil, fmt.Errorf("capability is not a PSObject, got %T", objs[0])
+	}
+
+	caps := &capabilityData{}
+
+	// Extract protocol version
+	if pv, ok := psObj.Properties["protocolversion"].(string); ok {
+		caps.ProtocolVersion = pv
+	}
+
+	// Extract PS version
+	if psv, ok := psObj.Properties["PSVersion"].(string); ok {
+		caps.PSVersion = psv
+	}
+
+	// Extract serialization version
+	if sv, ok := psObj.Properties["SerializationVersion"].(string); ok {
+		caps.SerializationVersion = sv
+	}
+
+	return caps, nil
+}
+
+// runspacePoolStateInfo represents parsed RUNSPACEPOOL_STATE data.
+type runspacePoolStateInfo struct {
+	State        messages.RunspacePoolState
+	MinRunspaces int
+	MaxRunspaces int
+}
+
+// parseRunspacePoolState parses the CLIXML state data from a RUNSPACEPOOL_STATE message.
+func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
+	deser := serialization.NewDeserializer()
+	objs, err := deser.Deserialize(data)
+	if err != nil {
+		return nil, fmt.Errorf("deserialize state data: %w", err)
+	}
+
+	if len(objs) == 0 {
+		return nil, fmt.Errorf("no state object in message")
+	}
+
+	info := &runspacePoolStateInfo{}
+
+	// The state should be an Int32
+	if state, ok := objs[0].(int32); ok {
+		info.State = messages.RunspacePoolState(state)
+	} else {
+		return nil, fmt.Errorf("state is not int32, got %T", objs[0])
+	}
+
+	// Additional objects may contain min/max runspaces
+	if len(objs) > 1 {
+		if psObj, ok := objs[1].(*serialization.PSObject); ok {
+			if min, ok := psObj.Properties["MinRunspaces"].(int32); ok {
+				info.MinRunspaces = int(min)
+			}
+			if max, ok := psObj.Properties["MaxRunspaces"].(int32); ok {
+				info.MaxRunspaces = int(max)
+			}
+		}
+	}
+
+	return info, nil
 }

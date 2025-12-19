@@ -248,8 +248,18 @@ func TestOpenSuccess(t *testing.T) {
 	pool := New(transport, poolID)
 
 	// Queue server responses
-	capabilityData := []byte(`<Obj RefId="0"><MS><Version N="protocolversion">2.3</Version></MS></Obj>`)
-	stateData := []byte(`<Obj RefId="0"><MS><I32 N="RunspaceState">2</I32></MS></Obj>`)
+	capabilityData := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <MS>
+      <S N="protocolversion">2.3</S>
+    </MS>
+  </Obj>
+</Objs>`)
+	stateData := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <I32>2</I32>
+</Objs>`)
 
 	// Queue SESSION_CAPABILITY response
 	capMsg := &messages.Message{
@@ -471,7 +481,14 @@ func TestHostCallbackDuringOpen(t *testing.T) {
 	pool := New(transport, poolID)
 
 	// Queue server responses including a host callback
-	capabilityData := []byte(`<Obj RefId="0"><MS><Version N="protocolversion">2.3</Version></MS></Obj>`)
+	capabilityData := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <MS>
+      <S N="protocolversion">2.3</S>
+    </MS>
+  </Obj>
+</Objs>`)
 
 	// Queue SESSION_CAPABILITY response
 	capMsg := &messages.Message{
@@ -507,7 +524,10 @@ func TestHostCallbackDuringOpen(t *testing.T) {
 	}
 
 	// Queue RUNSPACEPOOL_STATE response
-	stateData := []byte(`<Obj RefId="0"><MS><I32 N="RunspaceState">2</I32></MS></Obj>`)
+	stateData := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <I32>2</I32>
+</Objs>`)
 	stateMsg := &messages.Message{
 		Destination: messages.DestinationClient,
 		Type:        messages.MessageTypeRunspacePoolState,
@@ -569,5 +589,275 @@ func TestHostCallbackDuringOpen(t *testing.T) {
 	}
 	if response.ExceptionRaised {
 		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+}
+
+func TestParseCapabilityData(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		expected *capabilityData
+		wantErr  bool
+	}{
+		{
+			name: "valid capability with all fields",
+			data: []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <MS>
+      <S N="protocolversion">2.3</S>
+      <S N="PSVersion">5.1.0.0</S>
+      <S N="SerializationVersion">1.1.0.1</S>
+    </MS>
+  </Obj>
+</Objs>`),
+			expected: &capabilityData{
+				ProtocolVersion:      "2.3",
+				PSVersion:            "5.1.0.0",
+				SerializationVersion: "1.1.0.1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "minimal capability with only protocol version",
+			data: []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <MS>
+      <S N="protocolversion">2.2</S>
+    </MS>
+  </Obj>
+</Objs>`),
+			expected: &capabilityData{
+				ProtocolVersion: "2.2",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "empty data",
+			data:    []byte(`<?xml version="1.0" encoding="utf-8"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"></Objs>`),
+			wantErr: true,
+		},
+		{
+			name:    "invalid XML",
+			data:    []byte(`not xml`),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseCapabilityData(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseCapabilityData() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if result.ProtocolVersion != tt.expected.ProtocolVersion {
+				t.Errorf("ProtocolVersion = %v, want %v", result.ProtocolVersion, tt.expected.ProtocolVersion)
+			}
+			if result.PSVersion != tt.expected.PSVersion {
+				t.Errorf("PSVersion = %v, want %v", result.PSVersion, tt.expected.PSVersion)
+			}
+			if result.SerializationVersion != tt.expected.SerializationVersion {
+				t.Errorf("SerializationVersion = %v, want %v", result.SerializationVersion, tt.expected.SerializationVersion)
+			}
+		})
+	}
+}
+
+func TestParseRunspacePoolState(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		expected *runspacePoolStateInfo
+		wantErr  bool
+	}{
+		{
+			name: "state Opened (2)",
+			data: []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <I32>2</I32>
+</Objs>`),
+			expected: &runspacePoolStateInfo{
+				State: messages.RunspacePoolStateOpened,
+			},
+			wantErr: false,
+		},
+		{
+			name: "state with min/max runspaces",
+			data: []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <I32>2</I32>
+  <Obj RefId="0">
+    <MS>
+      <I32 N="MinRunspaces">1</I32>
+      <I32 N="MaxRunspaces">5</I32>
+    </MS>
+  </Obj>
+</Objs>`),
+			expected: &runspacePoolStateInfo{
+				State:        messages.RunspacePoolStateOpened,
+				MinRunspaces: 1,
+				MaxRunspaces: 5,
+			},
+			wantErr: false,
+		},
+		{
+			name: "state Broken (5)",
+			data: []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <I32>5</I32>
+</Objs>`),
+			expected: &runspacePoolStateInfo{
+				State: messages.RunspacePoolStateBroken,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "empty data",
+			data:    []byte(`<?xml version="1.0" encoding="utf-8"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"></Objs>`),
+			wantErr: true,
+		},
+		{
+			name:    "invalid type (string instead of int32)",
+			data: []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <S>not a number</S>
+</Objs>`),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseRunspacePoolState(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseRunspacePoolState() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if result.State != tt.expected.State {
+				t.Errorf("State = %v, want %v", result.State, tt.expected.State)
+			}
+			if result.MinRunspaces != tt.expected.MinRunspaces {
+				t.Errorf("MinRunspaces = %v, want %v", result.MinRunspaces, tt.expected.MinRunspaces)
+			}
+			if result.MaxRunspaces != tt.expected.MaxRunspaces {
+				t.Errorf("MaxRunspaces = %v, want %v", result.MaxRunspaces, tt.expected.MaxRunspaces)
+			}
+		})
+	}
+}
+
+func TestReceiveSessionCapability_VersionValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		protocolVer   string
+		wantErr       bool
+		expectedError string
+	}{
+		{
+			name:        "compatible version 2.3",
+			protocolVer: "2.3",
+			wantErr:     false,
+		},
+		{
+			name:        "compatible version 2.2",
+			protocolVer: "2.2",
+			wantErr:     false,
+		},
+		{
+			name:        "compatible version 2.0",
+			protocolVer: "2.0",
+			wantErr:     false,
+		},
+		{
+			name:          "incompatible version 1.0",
+			protocolVer:   "1.0",
+			wantErr:       true,
+			expectedError: "incompatible protocol version",
+		},
+		{
+			name:          "incompatible version 3.0",
+			protocolVer:   "3.0",
+			wantErr:       true,
+			expectedError: "incompatible protocol version",
+		},
+		{
+			name:          "no version provided",
+			protocolVer:   "",
+			wantErr:       true,
+			expectedError: "server did not provide protocol version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := newMockTransport()
+			poolID := uuid.New()
+			pool := New(transport, poolID)
+
+			// Create capability data
+			var capabilityData []byte
+			if tt.protocolVer != "" {
+				capabilityData = []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <MS>
+      <S N="protocolversion">` + tt.protocolVer + `</S>
+    </MS>
+  </Obj>
+</Objs>`)
+			} else {
+				capabilityData = []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <MS>
+    </MS>
+  </Obj>
+</Objs>`)
+			}
+
+			// Queue SESSION_CAPABILITY response
+			capMsg := &messages.Message{
+				Destination: messages.DestinationClient,
+				Type:        messages.MessageTypeSessionCapability,
+				RunspaceID:  poolID,
+				PipelineID:  uuid.Nil,
+				Data:        capabilityData,
+			}
+			if err := transport.queueMessage(capMsg); err != nil {
+				t.Fatalf("failed to queue capability message: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			err := pool.receiveSessionCapability(ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("receiveSessionCapability() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && tt.expectedError != "" {
+				if err == nil || !bytes.Contains([]byte(err.Error()), []byte(tt.expectedError)) {
+					t.Errorf("expected error containing %q, got %v", tt.expectedError, err)
+				}
+			}
+
+			if !tt.wantErr {
+				// Verify the protocol version was stored
+				pool.mu.RLock()
+				if pool.serverProtocolVersion != tt.protocolVer {
+					t.Errorf("serverProtocolVersion = %v, want %v", pool.serverProtocolVersion, tt.protocolVer)
+				}
+				pool.mu.RUnlock()
+			}
+		})
 	}
 }

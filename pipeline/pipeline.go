@@ -82,6 +82,10 @@ type Pipeline struct {
 	// Completion
 	doneCh chan struct{}
 	err    error
+
+	// Lifecycle management
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New creates a new Pipeline attached to the given transport.
@@ -91,6 +95,7 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 	// Default to treating input as a script
 	ps.AddCommand(command, true)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Pipeline{
 		id:         uuid.New(),
 		runspaceID: runspaceID,
@@ -100,12 +105,15 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 		outputCh:   make(chan *messages.Message, 100), // Buffered to prevent blocking
 		errorCh:    make(chan *messages.Message, 100),
 		doneCh:     make(chan struct{}),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
 // NewBuilder creates a new Pipeline with an empty command list.
 // Use AddCommand/AddParameter to build the pipeline.
 func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Pipeline{
 		id:         uuid.New(),
 		runspaceID: runspaceID,
@@ -115,6 +123,8 @@ func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 		outputCh:   make(chan *messages.Message, 100),
 		errorCh:    make(chan *messages.Message, 100),
 		doneCh:     make(chan struct{}),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -291,7 +301,7 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 	case messages.MessageTypePipelineHostCall:
 		go func() {
 			// Handle host call in background
-			if err := p.handleHostCall(context.Background(), msg); err != nil {
+			if err := p.handleHostCall(p.ctx, msg); err != nil {
 				// TODO: Log error or signal failure?
 				_ = err
 			}
@@ -344,5 +354,6 @@ func (p *Pipeline) transition(newState State, err error) {
 		close(p.doneCh)
 		close(p.outputCh)
 		close(p.errorCh)
+		p.cancel()
 	}
 }

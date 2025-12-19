@@ -56,6 +56,7 @@ import (
 	"github.com/smnsjas/go-psrpcore/fragments"
 	"github.com/smnsjas/go-psrpcore/host"
 	"github.com/smnsjas/go-psrpcore/messages"
+	"github.com/smnsjas/go-psrpcore/objects"
 	"github.com/smnsjas/go-psrpcore/pipeline"
 	"github.com/smnsjas/go-psrpcore/serialization"
 )
@@ -136,14 +137,21 @@ type Pool struct {
 	negotiatedMinRunspaces int
 
 	// Host callback handling
+	// Host callback handling
 	host                host.Host
 	hostCallbackHandler *host.CallbackHandler
+
+	// Metadata
+	metadataCh chan *messages.Message
 
 	// Pipelines
 	pipelines map[uuid.UUID]*pipeline.Pipeline
 
 	// Channels for message processing
-	stateCh chan State
+	stateCh    chan State
+	outgoingCh chan *messages.Message
+	readyCh    chan struct{}
+	doneCh     chan struct{}
 }
 
 // New creates a new RunspacePool with the given transport and ID.
@@ -156,12 +164,16 @@ func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 		transport:           transport,
 		minRunspaces:        1,
 		maxRunspaces:        1,
-		fragmenter:          fragments.NewFragmenter(32768), // Default max fragment size
-		assembler:           fragments.NewAssembler(),
 		host:                defaultHost,
 		hostCallbackHandler: host.NewCallbackHandler(defaultHost),
+		metadataCh:          make(chan *messages.Message, 1),
+		fragmenter:          fragments.NewFragmenter(32768), // Default max fragment size
+		assembler:           fragments.NewAssembler(),
 		pipelines:           make(map[uuid.UUID]*pipeline.Pipeline),
 		stateCh:             make(chan State, 1),
+		outgoingCh:          make(chan *messages.Message, 100),
+		readyCh:             make(chan struct{}),
+		doneCh:              make(chan struct{}),
 	}
 }
 
@@ -417,6 +429,93 @@ func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 	return p.sendMessage(ctx, msg)
 }
 
+// GetCommandMetadata queries the server for information about available commands.
+// names allows filtering by wildcards (e.g., "*Process", "Get-*"). If empty, returns all commands.
+func (p *Pool) GetCommandMetadata(ctx context.Context, names []string) ([]*objects.CommandMetadata, error) {
+	if p.state != StateOpened {
+		return nil, ErrNotOpen
+	}
+
+	// Default to * if no names provided
+	if len(names) == 0 {
+		names = []string{"*"}
+	}
+
+	// Serialize the request (list of strings)
+	serializer := serialization.NewSerializer()
+	data, err := serializer.Serialize(names)
+	if err != nil {
+		return nil, fmt.Errorf("serialize metadata request: %w", err)
+	}
+
+	// Send GET_COMMAND_METADATA message
+	msg := messages.NewGetCommandMetadata(p.id, data)
+	if err := p.sendMessage(ctx, msg); err != nil {
+		return nil, fmt.Errorf("send metadata request: %w", err)
+	}
+
+	// Wait for reply
+	select {
+	case reply := <-p.metadataCh:
+		return parseCommandMetadata(reply.Data)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-p.doneCh:
+		return nil, ErrClosed
+	}
+}
+
+// parseCommandMetadata parses the CLIXML command metadata from a GET_COMMAND_METADATA_REPLY message.
+func parseCommandMetadata(data []byte) ([]*objects.CommandMetadata, error) {
+	deser := serialization.NewDeserializer()
+	objs, err := deser.Deserialize(data)
+	if err != nil {
+		return nil, fmt.Errorf("deserialize metadata: %w", err)
+	}
+
+	var results []*objects.CommandMetadata
+
+	for _, obj := range objs {
+		// Expecting PSObjects representing CommandMetadata
+		psObj, ok := obj.(*serialization.PSObject)
+		if !ok {
+			// Might be a primitive if the server returns weird data, but usually objects
+			continue
+		}
+
+		meta := &objects.CommandMetadata{}
+		if name, ok := psObj.Properties["Name"].(string); ok {
+			meta.Name = name
+		}
+
+		// CommandType is often int or enum
+		if ct, ok := psObj.Properties["CommandType"].(int32); ok {
+			meta.CommandType = int(ct)
+		} else if ct, ok := psObj.Properties["CommandType"].(int); ok {
+			meta.CommandType = ct
+		}
+
+		// Parameters (Dictionary)
+		if params, ok := psObj.Properties["Parameters"].(map[string]interface{}); ok {
+			meta.Parameters = make(map[string]objects.ParameterMetadata)
+			for pname, pval := range params {
+				// Each value in the dictionary is usually a ParameterMetadata object
+				pm := objects.ParameterMetadata{Name: pname}
+				if innerPSObj, ok := pval.(*serialization.PSObject); ok {
+					if t, ok := innerPSObj.Properties["ParameterType"].(string); ok {
+						pm.Type = t
+					}
+				}
+				meta.Parameters[pname] = pm
+			}
+		}
+
+		results = append(results, meta)
+	}
+
+	return results, nil
+}
+
 // waitForOpened waits for the RUNSPACEPOOL_STATE message indicating the pool is opened.
 func (p *Pool) waitForOpened(ctx context.Context) error {
 	msg, err := p.receiveMessageWithHostCallbacks(ctx)
@@ -518,6 +617,15 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 					// Log error?
 				}
 			}()
+			// Handle metadata replies
+		case messages.MessageTypeGetCommandMetadataReply:
+			select {
+			case p.metadataCh <- msg:
+			default:
+				// Dropping metadata reply if channel is full or no one is listening
+				// In a real implementation we might want to log this
+			}
+
 		case messages.MessageTypeRunspacePoolState:
 			// Handle state changes if any (e.g. Broken/Closed from server)
 		}

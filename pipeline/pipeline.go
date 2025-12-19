@@ -179,6 +179,7 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 	// Create CREATE_PIPELINE message
 	// Serialize the PowerShell object to CLIXML
 	serializer := serialization.NewSerializer()
+	defer serializer.Close()
 	cmdData, err := serializer.Serialize(p.powerShell)
 	if err != nil {
 		p.transition(StateFailed, err)
@@ -224,6 +225,7 @@ func (p *Pipeline) SendInput(ctx context.Context, data interface{}) error {
 	p.mu.Unlock()
 
 	serializer := serialization.NewSerializer()
+	defer serializer.Close()
 	xmlData, err := serializer.Serialize(data)
 	if err != nil {
 		return fmt.Errorf("serialize input: %w", err)

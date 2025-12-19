@@ -1,4 +1,4 @@
-module github.com/jasonmfehr/go-psrp
+module github.com/smnsjas/go-psrpcore
 
 go 1.21
 

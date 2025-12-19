@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jasonmfehr/go-psrp/messages"
+	"github.com/smnsjas/go-psrpcore/host"
+	"github.com/smnsjas/go-psrpcore/messages"
 )
 
 // mockTransport is a mock implementation of Transport for testing.
@@ -21,6 +22,10 @@ func (m *mockTransport) SendMessage(ctx context.Context, msg *messages.Message) 
 	}
 	m.sent = append(m.sent, msg)
 	return nil
+}
+
+func (m *mockTransport) Host() host.Host {
+	return host.NewNullHost()
 }
 
 func TestPipeline_Invoke(t *testing.T) {
@@ -116,5 +121,67 @@ func TestPipeline_Completion(t *testing.T) {
 		// success
 	case <-time.After(time.Second):
 		t.Error("timeout waiting for completion signal")
+	}
+}
+
+func TestPipeline_Stop(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+	_ = p.Invoke(context.Background())
+
+	// Call Stop
+	err := p.Stop(context.Background())
+	if err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if p.State() != StateStopping {
+		t.Errorf("expected state Stopping, got %v", p.State())
+	}
+
+	// Verify SIGNAL message sent
+	if len(transport.sent) != 2 { // Create + Signal
+		t.Fatalf("expected 2 messages, got %d", len(transport.sent))
+	}
+	msg := transport.sent[1]
+	if msg.Type != messages.MessageTypeSignal {
+		t.Errorf("expected Signal message, got %v", msg.Type)
+	}
+}
+
+func TestPipeline_Input(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+	_ = p.Invoke(context.Background())
+
+	// Send Input
+	inputData := "some input"
+	err := p.SendInput(context.Background(), inputData)
+	if err != nil {
+		t.Fatalf("SendInput failed: %v", err)
+	}
+
+	// Verify PIPELINE_INPUT message
+	if len(transport.sent) < 2 {
+		t.Fatalf("expected input message to be sent")
+	}
+	msg := transport.sent[1]
+	if msg.Type != messages.MessageTypePipelineInput {
+		t.Errorf("expected PipelineInput message, got %v", msg.Type)
+	}
+
+	// Close Input
+	err = p.CloseInput(context.Background())
+	if err != nil {
+		t.Fatalf("CloseInput failed: %v", err)
+	}
+
+	// Verify END_OF_PIPELINE_INPUT message
+	if len(transport.sent) < 3 {
+		t.Fatalf("expected end of input message to be sent")
+	}
+	msgEnd := transport.sent[2]
+	if msgEnd.Type != messages.MessageTypeEndOfPipelineInput {
+		t.Errorf("expected EndOfPipelineInput message, got %v", msgEnd.Type)
 	}
 }

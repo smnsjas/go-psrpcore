@@ -1,7 +1,7 @@
-# go-psrp
+# go-psrpcore
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/jasonmfehr/go-psrp.svg)](https://pkg.go.dev/github.com/jasonmfehr/go-psrp)
-[![Go Report Card](https://goreportcard.com/badge/github.com/jasonmfehr/go-psrp)](https://goreportcard.com/report/github.com/jasonmfehr/go-psrp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/smnsjas/go-psrpcore.svg)](https://pkg.go.dev/github.com/smnsjas/go-psrpcore)
+[![Go Report Card](https://goreportcard.com/badge/github.com/smnsjas/go-psrpcore)](https://goreportcard.com/report/github.com/smnsjas/go-psrpcore)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Pure Go implementation of the PowerShell Remoting Protocol (PSRP).
@@ -35,7 +35,7 @@ Your Application
 ## Installation
 
 ```bash
-go get github.com/jasonmfehr/go-psrp
+go get github.com/smnsjas/go-psrpcore
 ```
 
 ## Quick Start
@@ -48,7 +48,7 @@ import (
     "fmt"
     "io"
 
-    "github.com/jasonmfehr/go-psrp"
+    "github.com/smnsjas/go-psrpcore"
 )
 
 func main() {
@@ -136,7 +136,7 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 ## Documentation
 
 - [MS-PSRP Protocol Specification](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/)
-- [Package Documentation](https://pkg.go.dev/github.com/jasonmfehr/go-psrp)
+- [Package Documentation](https://pkg.go.dev/github.com/smnsjas/go-psrpcore)
 
 ## Related Projects
 

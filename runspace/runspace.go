@@ -53,11 +53,11 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/jasonmfehr/go-psrp/fragments"
-	"github.com/jasonmfehr/go-psrp/host"
-	"github.com/jasonmfehr/go-psrp/messages"
-	"github.com/jasonmfehr/go-psrp/pipeline"
-	"github.com/jasonmfehr/go-psrp/serialization"
+	"github.com/smnsjas/go-psrpcore/fragments"
+	"github.com/smnsjas/go-psrpcore/host"
+	"github.com/smnsjas/go-psrpcore/messages"
+	"github.com/smnsjas/go-psrpcore/pipeline"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 var (
@@ -136,6 +136,7 @@ type Pool struct {
 	negotiatedMinRunspaces int
 
 	// Host callback handling
+	host                host.Host
 	hostCallbackHandler *host.CallbackHandler
 
 	// Pipelines
@@ -148,6 +149,7 @@ type Pool struct {
 // New creates a new RunspacePool with the given transport and ID.
 // The pool starts in StateBeforeOpen.
 func New(transport io.ReadWriter, id uuid.UUID) *Pool {
+	defaultHost := host.NewNullHost()
 	return &Pool{
 		id:                  id,
 		state:               StateBeforeOpen,
@@ -156,7 +158,8 @@ func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 		maxRunspaces:        1,
 		fragmenter:          fragments.NewFragmenter(32768), // Default max fragment size
 		assembler:           fragments.NewAssembler(),
-		hostCallbackHandler: host.NewCallbackHandler(host.NewNullHost()),
+		host:                defaultHost,
+		hostCallbackHandler: host.NewCallbackHandler(defaultHost),
 		pipelines:           make(map[uuid.UUID]*pipeline.Pipeline),
 		stateCh:             make(chan State, 1),
 	}
@@ -172,8 +175,16 @@ func (p *Pool) SetHost(h host.Host) error {
 	if p.state != StateBeforeOpen {
 		return ErrInvalidState
 	}
+	p.host = h
 	p.hostCallbackHandler = host.NewCallbackHandler(h)
 	return nil
+}
+
+// Host returns the host implementation associated with the runspace pool.
+func (p *Pool) Host() host.Host {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.host
 }
 
 // ID returns the unique identifier of the runspace pool.

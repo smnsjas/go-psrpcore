@@ -774,7 +774,7 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 				}
 				obj.ToString = s
 
-			case "Props": // Properties
+			case "Props", "MS": // Properties or Member Set
 				props, err := d.deserializeProperties()
 				if err != nil {
 					return nil, err
@@ -877,7 +877,7 @@ func (d *Deserializer) deserializeProperties() (map[string]interface{}, error) {
 			}
 
 		case xml.EndElement:
-			if t.Name.Local == "Props" {
+			if t.Name.Local == "Props" || t.Name.Local == "MS" {
 				return props, nil
 			}
 		}

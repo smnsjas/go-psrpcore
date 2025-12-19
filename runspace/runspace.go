@@ -152,12 +152,17 @@ type Pool struct {
 	outgoingCh chan *messages.Message
 	readyCh    chan struct{}
 	doneCh     chan struct{}
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New creates a new RunspacePool with the given transport and ID.
 // The pool starts in StateBeforeOpen.
 func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 	defaultHost := host.NewNullHost()
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Pool{
 		id:                  id,
 		state:               StateBeforeOpen,
@@ -174,6 +179,8 @@ func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 		outgoingCh:          make(chan *messages.Message, 100),
 		readyCh:             make(chan struct{}),
 		doneCh:              make(chan struct{}),
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 }
 
@@ -299,7 +306,7 @@ func (p *Pool) Open(ctx context.Context) error {
 	}
 
 	// Start message dispatch loop
-	go p.dispatchLoop(ctx)
+	go p.dispatchLoop(p.ctx)
 
 	return nil
 }
@@ -331,6 +338,7 @@ func (p *Pool) Close(ctx context.Context) error {
 	// Transition to Closed
 	p.mu.Lock()
 	p.setState(StateClosed)
+	p.cancel()
 	p.mu.Unlock()
 
 	return nil
@@ -573,7 +581,20 @@ func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 	pl := pipeline.New(p, p.id, command)
 	p.pipelines[pl.ID()] = pl
 
+	// Start a monitoring goroutine to remove the pipeline when it's done
+	go func() {
+		_ = pl.Wait() // Wait for completion
+		p.removePipeline(pl.ID())
+	}()
+
 	return pl, nil
+}
+
+// removePipeline removes a pipeline from the pool's map.
+func (p *Pool) removePipeline(id uuid.UUID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.pipelines, id)
 }
 
 // dispatchLoop processes incoming messages and routes them to pipelines.

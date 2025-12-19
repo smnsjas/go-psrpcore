@@ -2,6 +2,7 @@ package host
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/smnsjas/go-psrpcore/serialization"
 )
@@ -82,8 +83,14 @@ func DecodeRemoteHostCall(data []byte) (*RemoteHostCall, error) {
 		case int32:
 			call.MethodID = MethodID(v)
 		case int:
+			if v < math.MinInt32 || v > math.MaxInt32 {
+				return nil, fmt.Errorf("MethodID out of range: %d", v)
+			}
 			call.MethodID = MethodID(v)
 		case int64:
+			if v < math.MinInt32 || v > math.MaxInt32 {
+				return nil, fmt.Errorf("MethodID out of range: %d", v)
+			}
 			call.MethodID = MethodID(v)
 		default:
 			return nil, fmt.Errorf("invalid MethodID type: %T", mi)

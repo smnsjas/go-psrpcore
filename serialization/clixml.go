@@ -206,7 +206,7 @@ func (s *Serializer) Serialize(v interface{}) ([]byte, error) {
 	s.buf.WriteString(`<Objs Version="` + CLIXMLVersion + `" xmlns="` + CLIXMLNamespace + `">`)
 
 	if err := s.serializeValue(v); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("serialize value: %w", err)
 	}
 
 	s.buf.WriteString("</Objs>")
@@ -265,7 +265,7 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		s.buf.WriteString(nameAttr)
 		s.buf.WriteString(">")
 		if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
-			return err
+			return fmt.Errorf("escape string: %w", err)
 		}
 		s.buf.WriteString("</S>")
 
@@ -333,9 +333,9 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		s.buf.WriteString("<LST")
 		s.buf.WriteString(nameAttr)
 		s.buf.WriteString(">")
-		for _, item := range val {
+		for i, item := range val {
 			if err := s.serializeValue(item); err != nil {
-				return err
+				return fmt.Errorf("serialize list item %d: %w", i, err)
 			}
 		}
 		s.buf.WriteString("</LST>")
@@ -365,7 +365,7 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 			var err error
 			data, err = s.encryptor.Encrypt(val.EncryptedBytes())
 			if err != nil {
-				return err
+				return fmt.Errorf("encrypt secure string: %w", err)
 			}
 		} else {
 			// No provider, use internal encrypted bytes (local protection)
@@ -377,7 +377,7 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 	case *objects.ScriptBlock:
 		s.buf.WriteString(fmt.Sprintf("<SB%s>", nameAttr))
 		if err := xml.EscapeText(&s.buf, []byte(val.Text)); err != nil {
-			return err
+			return fmt.Errorf("escape script block: %w", err)
 		}
 		s.buf.WriteString("</SB>")
 
@@ -426,7 +426,7 @@ func (s *Serializer) serializeArray(v reflect.Value, name string) error {
 	for i := 0; i < v.Len(); i++ {
 		val := v.Index(i).Interface()
 		if err := s.serializeValueWithName(val, ""); err != nil {
-			return err
+			return fmt.Errorf("serialize array element %d: %w", i, err)
 		}
 	}
 
@@ -551,7 +551,7 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 			for _, tn := range obj.TypeNames {
 				s.buf.WriteString("<T>")
 				if err := xml.EscapeText(&s.buf, []byte(tn)); err != nil {
-					return err
+					return fmt.Errorf("escape type name: %w", err)
 				}
 				s.buf.WriteString("</T>")
 			}
@@ -563,7 +563,7 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 	if obj.ToString != "" {
 		s.buf.WriteString("<ToString>")
 		if err := xml.EscapeText(&s.buf, []byte(obj.ToString)); err != nil {
-			return err
+			return fmt.Errorf("escape tostring: %w", err)
 		}
 		s.buf.WriteString("</ToString>")
 	}
@@ -573,7 +573,7 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		s.buf.WriteString("<Props>")
 		for propName, propValue := range obj.Properties {
 			if err := s.serializeValueWithName(propValue, propName); err != nil {
-				return err
+				return fmt.Errorf("serialize property %s: %w", propName, err)
 			}
 		}
 		s.buf.WriteString("</Props>")
@@ -624,11 +624,11 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 		s.buf.WriteString("<En>")
 		s.buf.WriteString("<S N=\"Key\">")
 		if err := xml.EscapeText(&s.buf, []byte(k)); err != nil {
-			return err
+			return fmt.Errorf("escape dict key: %w", err)
 		}
 		s.buf.WriteString("</S>")
 		if err := s.serializeValueWithName(v, "Value"); err != nil {
-			return err
+			return fmt.Errorf("serialize dict value for key %s: %w", k, err)
 		}
 		s.buf.WriteString("</En>")
 	}
@@ -737,7 +737,7 @@ func (d *Deserializer) deserializeNext() (interface{}, bool, error) {
 	for {
 		tok, err := d.dec.Token()
 		if err != nil {
-			return nil, false, fmt.Errorf("%w: %v", ErrInvalidCLIXML, err)
+			return nil, false, fmt.Errorf("%w: read token: %v", ErrInvalidCLIXML, err)
 		}
 
 		switch t := tok.(type) {
@@ -762,21 +762,21 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 	switch se.Name.Local {
 	case "Nil":
 		if err := d.dec.Skip(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("skip nil: %w", err)
 		}
 		return nil, nil
 
 	case "S": // String
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode string: %w", err)
 		}
 		return s, nil
 
 	case "I32": // Int32
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode int32: %w", err)
 		}
 		v, err := strconv.ParseInt(s, 10, 32)
 		return int32(v), err
@@ -784,42 +784,42 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 	case "I64": // Int64
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode int64: %w", err)
 		}
 		return strconv.ParseInt(s, 10, 64)
 
 	case "B": // Boolean
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode bool: %w", err)
 		}
 		return s == "true", nil
 
 	case "Db": // Double
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode double: %w", err)
 		}
 		return strconv.ParseFloat(s, 64)
 
 	case "BA": // Byte Array
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode byte array: %w", err)
 		}
 		return base64.StdEncoding.DecodeString(s)
 
 	case "G": // GUID
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode guid: %w", err)
 		}
 		return uuid.Parse(s)
 
 	case "DT": // DateTime
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode datetime: %w", err)
 		}
 		return time.Parse(time.RFC3339Nano, s)
 
@@ -847,7 +847,7 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 	case "SS": // SecureString
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode secure string: %w", err)
 		}
 		data, err := base64.StdEncoding.DecodeString(s)
 		if err != nil {
@@ -877,14 +877,14 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 	case "SB": // ScriptBlock
 		var s string
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode script block: %w", err)
 		}
 		return &objects.ScriptBlock{Text: s}, nil
 
 	default:
 		// Skip unknown elements
 		if err := d.dec.Skip(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("skip unknown: %w", err)
 		}
 		return nil, nil
 	}

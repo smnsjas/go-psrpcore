@@ -72,6 +72,8 @@ var (
 	ErrClosed = errors.New("runspace pool is closed")
 	// ErrBroken is returned when the pool is in a broken state.
 	ErrBroken = errors.New("runspace pool is broken")
+	// ErrProtocolViolation is returned when the server violates the PSRP protocol.
+	ErrProtocolViolation = errors.New("protocol violation")
 )
 
 // State represents the current state of a RunspacePool.
@@ -390,7 +392,7 @@ func (p *Pool) receiveSessionCapability(ctx context.Context) error {
 	}
 
 	if msg.Type != messages.MessageTypeSessionCapability {
-		return fmt.Errorf("expected SESSION_CAPABILITY, got %v", msg.Type)
+		return fmt.Errorf("%w: expected SESSION_CAPABILITY, got %v", ErrProtocolViolation, msg.Type)
 	}
 
 	// Parse the capability data
@@ -401,12 +403,12 @@ func (p *Pool) receiveSessionCapability(ctx context.Context) error {
 
 	// Validate protocol version
 	if caps.ProtocolVersion == "" {
-		return fmt.Errorf("server did not provide protocol version")
+		return fmt.Errorf("%w: server did not provide protocol version", ErrProtocolViolation)
 	}
 
 	// Check if protocol version is compatible (we support 2.x)
 	if len(caps.ProtocolVersion) < 2 || caps.ProtocolVersion[0] != '2' {
-		return fmt.Errorf("incompatible protocol version: server=%s, client=2.3", caps.ProtocolVersion)
+		return fmt.Errorf("%w: incompatible protocol version: server=%s, client=2.3", ErrProtocolViolation, caps.ProtocolVersion)
 	}
 
 	// Store negotiated capabilities
@@ -532,7 +534,7 @@ func (p *Pool) waitForOpened(ctx context.Context) error {
 	}
 
 	if msg.Type != messages.MessageTypeRunspacePoolState {
-		return fmt.Errorf("expected RUNSPACEPOOL_STATE, got %v", msg.Type)
+		return fmt.Errorf("%w: expected RUNSPACEPOOL_STATE, got %v", ErrProtocolViolation, msg.Type)
 	}
 
 	// Parse the state message
@@ -543,7 +545,7 @@ func (p *Pool) waitForOpened(ctx context.Context) error {
 
 	// Verify the state is Opened
 	if stateInfo.State != messages.RunspacePoolStateOpened {
-		return fmt.Errorf("expected state Opened, got %d", stateInfo.State)
+		return fmt.Errorf("%w: expected state Opened, got %d", ErrInvalidState, stateInfo.State)
 	}
 
 	// Store negotiated runspace counts if provided
@@ -635,7 +637,8 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			// Dispatch host call in background to not block loop
 			go func() {
 				if err := p.handleHostCall(ctx, msg); err != nil {
-					// Log error?
+					// Handling host call failed (likely transport error), pool is likely broken
+					p.setBroken()
 				}
 			}()
 			// Handle metadata replies

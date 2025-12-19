@@ -133,10 +133,23 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 └─────────────────────────────────────────┘
 ```
 
-## Documentation
+## Testing
 
-- [MS-PSRP Protocol Specification](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/)
-- [Package Documentation](https://pkg.go.dev/github.com/smnsjas/go-psrpcore)
+This library uses a **Sans-IO** design, making it easy to test without a live PowerShell server.
+
+### Functional Tests
+We provide a comprehensive functional test suite that simulates a PSRP server over a mock transport. This verifies the complete handshake and execution flow.
+
+```bash
+go test -v ./runspace -run TestEndToEndFunctional
+```
+
+### Unit Tests
+Run the full test suite (including sub-packages):
+
+```bash
+go test ./...
+```
 
 ## Related Projects
 

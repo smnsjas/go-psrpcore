@@ -295,10 +295,36 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		}
 
 	case messages.MessageTypePipelineState:
-		// TODO: Parse CLIXML state
-		// For now, assume Completed if we see this
-		// We need to parse the state to know if it's Completed, Failed, or Stopped
-		p.transition(StateCompleted, nil)
+		deser := serialization.NewDeserializer()
+		objs, err := deser.Deserialize(msg.Data)
+		if err != nil || len(objs) == 0 {
+			p.transition(StateFailed, fmt.Errorf("parse pipeline state: %w", err))
+			return nil
+		}
+
+		stateVal, ok := objs[0].(int32)
+		if !ok {
+			// Fallback to Completed if we can't parse but see the message
+			p.transition(StateCompleted, nil)
+			return nil
+		}
+
+		switch stateVal {
+		case 2: // Running
+			p.mu.Lock()
+			p.state = StateRunning
+			p.mu.Unlock()
+		case 3: // Stopping
+			p.mu.Lock()
+			p.state = StateStopping
+			p.mu.Unlock()
+		case 4: // Completed
+			p.transition(StateCompleted, nil)
+		case 5: // Failed
+			p.transition(StateFailed, fmt.Errorf("pipeline failed on server"))
+		case 6: // Stopped
+			p.transition(StateStopped, nil)
+		}
 
 	case messages.MessageTypePipelineHostCall:
 		go func() {

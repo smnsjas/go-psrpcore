@@ -3,7 +3,7 @@ package host
 import (
 	"fmt"
 
-	"github.com/jasonmfehr/go-psrp/serialization"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 // EncodeRemoteHostCall serializes a RemoteHostCall to CLIXML bytes.

@@ -7,7 +7,9 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/jasonmfehr/go-psrp/messages"
+	"github.com/smnsjas/go-psrpcore/host"
+	"github.com/smnsjas/go-psrpcore/messages"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 var (
@@ -57,6 +59,7 @@ func (s State) String() string {
 // This is typically implemented by the RunspacePool.
 type Transport interface {
 	SendMessage(ctx context.Context, msg *messages.Message) error
+	Host() host.Host
 }
 
 // Pipeline represents a PSRP command execution pipeline.
@@ -132,6 +135,67 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 	return nil
 }
 
+// Stop sends a signal to stop the running pipeline.
+// It sends a SIGNAL message (MS-PSRP 2.2.2.10) and transitions to StateStopping.
+func (p *Pipeline) Stop(ctx context.Context) error {
+	p.mu.Lock()
+	if p.state != StateRunning {
+		p.mu.Unlock()
+		return fmt.Errorf("%w: cannot stop pipeline that is not running (state=%s)", ErrInvalidState, p.state)
+	}
+	p.state = StateStopping
+	p.mu.Unlock()
+
+	msg := messages.NewSignal(p.runspaceID, p.id)
+	if err := p.transport.SendMessage(ctx, msg); err != nil {
+		return fmt.Errorf("send signal: %w", err)
+	}
+
+	return nil
+}
+
+// SendInput sends data to the running pipeline's input stream.
+// It serializes the data to CLIXML and sends a PIPELINE_INPUT message (MS-PSRP 2.2.2.13).
+func (p *Pipeline) SendInput(ctx context.Context, data interface{}) error {
+	p.mu.Lock()
+	if p.state != StateRunning {
+		p.mu.Unlock()
+		return fmt.Errorf("%w: cannot send input to pipeline that is not running (state=%s)", ErrInvalidState, p.state)
+	}
+	p.mu.Unlock()
+
+	serializer := serialization.NewSerializer()
+	xmlData, err := serializer.Serialize(data)
+	if err != nil {
+		return fmt.Errorf("serialize input: %w", err)
+	}
+
+	msg := messages.NewPipelineInput(p.runspaceID, p.id, xmlData)
+	if err := p.transport.SendMessage(ctx, msg); err != nil {
+		return fmt.Errorf("send pipeline input: %w", err)
+	}
+
+	return nil
+}
+
+// CloseInput closes the pipeline's input stream.
+// It sends an END_OF_PIPELINE_INPUT message (MS-PSRP 2.2.2.13).
+func (p *Pipeline) CloseInput(ctx context.Context) error {
+	p.mu.Lock()
+	if p.state != StateRunning {
+		p.mu.Unlock()
+		return fmt.Errorf("%w: cannot close input of pipeline that is not running (state=%s)", ErrInvalidState, p.state)
+	}
+	p.mu.Unlock()
+
+	msg := messages.NewEndOfPipelineInput(p.runspaceID, p.id)
+	if err := p.transport.SendMessage(ctx, msg); err != nil {
+		return fmt.Errorf("send end of pipeline input: %w", err)
+	}
+
+	return nil
+}
+
 // Output returns a channel that emits output messages.
 func (p *Pipeline) Output() <-chan *messages.Message {
 	return p.outputCh
@@ -174,6 +238,42 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		// For now, assume Completed if we see this
 		// We need to parse the state to know if it's Completed, Failed, or Stopped
 		p.transition(StateCompleted, nil)
+
+	case messages.MessageTypePipelineHostCall:
+		go func() {
+			// Handle host call in background
+			if err := p.handleHostCall(context.Background(), msg); err != nil {
+				// TODO: Log error or signal failure?
+				_ = err
+			}
+		}()
+	}
+
+	return nil
+}
+
+// handleHostCall processes a PIPELINE_HOST_CALL message and sends a response.
+func (p *Pipeline) handleHostCall(ctx context.Context, msg *messages.Message) error {
+	// Decode the RemoteHostCall from the message data
+	call, err := host.DecodeRemoteHostCall(msg.Data)
+	if err != nil {
+		return fmt.Errorf("decode host call: %w", err)
+	}
+
+	// Execute the host callback
+	h := p.transport.Host()
+	response := host.NewCallbackHandler(h).HandleCall(call)
+
+	// Encode the response
+	responseData, err := host.EncodeRemoteHostResponse(response)
+	if err != nil {
+		return fmt.Errorf("encode host response: %w", err)
+	}
+
+	// Send PIPELINE_HOST_RESPONSE message
+	responseMsg := messages.NewPipelineHostResponse(p.runspaceID, p.id, responseData)
+	if err := p.transport.SendMessage(ctx, responseMsg); err != nil {
+		return fmt.Errorf("send host response: %w", err)
 	}
 
 	return nil

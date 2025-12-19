@@ -4,8 +4,8 @@ package host
 import (
 	"fmt"
 
-	"github.com/jasonmfehr/go-psrp/objects"
-	"github.com/jasonmfehr/go-psrp/serialization"
+	"github.com/smnsjas/go-psrpcore/objects"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 // MethodID represents a PSHostUserInterface method identifier.

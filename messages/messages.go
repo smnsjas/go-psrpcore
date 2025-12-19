@@ -91,6 +91,7 @@ const (
 	MessageTypeInformationRecord       MessageType = 0x00021014
 	MessageTypePipelineHostCall        MessageType = 0x00021100
 	MessageTypePipelineHostResponse    MessageType = 0x00021101
+	MessageTypeSignal                  MessageType = 0x0002100B
 )
 
 // Message header size in bytes.

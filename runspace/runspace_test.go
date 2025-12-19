@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jasonmfehr/go-psrp/fragments"
-	"github.com/jasonmfehr/go-psrp/host"
-	"github.com/jasonmfehr/go-psrp/messages"
+	"github.com/smnsjas/go-psrpcore/fragments"
+	"github.com/smnsjas/go-psrpcore/host"
+	"github.com/smnsjas/go-psrpcore/messages"
 )
 
 // mockTransport is a mock transport for testing.

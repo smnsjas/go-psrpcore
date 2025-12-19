@@ -52,6 +52,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -87,13 +88,20 @@ type PSObjectWithRef struct {
 	RefID int
 }
 
+// EncryptionProvider defines the interface for encrypting and decrypting sensitive data.
+type EncryptionProvider interface {
+	Encrypt(data []byte) ([]byte, error)
+	Decrypt(data []byte) ([]byte, error)
+}
+
 // Serializer encodes Go values to CLIXML.
 type Serializer struct {
 	buf        bytes.Buffer
 	enc        *xml.Encoder
 	refCounter int
-	objRefs    []*objRef          // Track object references to avoid cycles (slice because maps aren't hashable)
-	tnRefs     map[string]int     // Track type name references
+	objRefs    []*objRef      // Track object references to avoid cycles (slice because maps aren't hashable)
+	tnRefs     map[string]int // Track type name references
+	encryptor  EncryptionProvider
 }
 
 type objRef struct {
@@ -103,9 +111,15 @@ type objRef struct {
 
 // NewSerializer creates a new Serializer.
 func NewSerializer() *Serializer {
+	return NewSerializerWithEncryption(nil)
+}
+
+// NewSerializerWithEncryption creates a new Serializer with an encryption provider.
+func NewSerializerWithEncryption(encryptor EncryptionProvider) *Serializer {
 	s := &Serializer{
-		objRefs: make([]*objRef, 0),
-		tnRefs:  make(map[string]int),
+		objRefs:   make([]*objRef, 0),
+		tnRefs:    make(map[string]int),
+		encryptor: encryptor,
 	}
 	s.enc = xml.NewEncoder(&s.buf)
 	s.enc.Indent("", "  ")
@@ -245,10 +259,75 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 	case *objects.ErrorRecord:
 		return s.serializePSObject(ErrorRecordToPSObject(val), name)
 
+	case *objects.SecureString:
+		s.buf.WriteString(fmt.Sprintf("<SS%s>", nameAttr))
+		var data []byte
+		if s.encryptor != nil {
+			// Encrypt with provider (Session Key)
+			var err error
+			data, err = s.encryptor.Encrypt(val.EncryptedBytes())
+			if err != nil {
+				return err
+			}
+		} else {
+			// No provider, use internal encrypted bytes (local protection)
+			data = val.EncryptedBytes()
+		}
+		s.buf.WriteString(base64.StdEncoding.EncodeToString(data))
+		s.buf.WriteString("</SS>")
+
+	case *objects.ScriptBlock:
+		s.buf.WriteString(fmt.Sprintf("<SB%s>", nameAttr))
+		xml.EscapeText(&s.buf, []byte(val.Text))
+		s.buf.WriteString("</SB>")
+
+	case *objects.PowerShell:
+		return s.serializePSObject(PowerShellToPSObject(val), name)
+
+	case *objects.Command:
+		return s.serializePSObject(CommandToPSObject(val), name)
+
+	case *objects.CommandParameter:
+		return s.serializePSObject(CommandParameterToPSObject(val), name)
+
 	default:
+		// Handle generic slices/arrays
+		rVal := reflect.ValueOf(v)
+		switch rVal.Kind() {
+		case reflect.Slice, reflect.Array:
+			return s.serializeArray(rVal, name)
+		}
+
 		return fmt.Errorf("%w: %T", ErrUnsupportedType, v)
 	}
 
+	return nil
+}
+
+// serializeArray serializes a slice or array as a LST element
+func (s *Serializer) serializeArray(v reflect.Value, name string) error {
+	// Allocate RefID (arrays are reference types)
+	refID := s.refCounter
+	s.refCounter++
+
+	nameAttr := ""
+	if name != "" {
+		nameAttr = fmt.Sprintf(" N=\"%s\"", name)
+	}
+
+	s.buf.WriteString(fmt.Sprintf("<Obj%s RefId=\"%d\">", nameAttr, refID))
+	s.buf.WriteString("<TN RefId=\"0\"><T>System.Object[]</T><T>System.Array</T><T>System.Object</T></TN>")
+	s.buf.WriteString("<LST>")
+
+	for i := 0; i < v.Len(); i++ {
+		val := v.Index(i).Interface()
+		if err := s.serializeValueWithName(val, ""); err != nil {
+			return err
+		}
+	}
+
+	s.buf.WriteString("</LST>")
+	s.buf.WriteString("</Obj>")
 	return nil
 }
 
@@ -426,11 +505,12 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 
 // Deserializer decodes CLIXML to Go values.
 type Deserializer struct {
-	dec          *xml.Decoder
-	objRefs      map[int]interface{} // Track deserialized objects by RefId
-	tnRefs       map[int][]string    // Track TypeNames by RefId
-	depth        int                 // Current recursion depth
-	maxDepth     int                 // Maximum allowed recursion depth
+	dec       *xml.Decoder
+	objRefs   map[int]interface{} // Track deserialized objects by RefId
+	tnRefs    map[int][]string    // Track TypeNames by RefId
+	depth     int                 // Current recursion depth
+	maxDepth  int                 // Maximum allowed recursion depth
+	decryptor EncryptionProvider
 }
 
 const (
@@ -440,19 +520,26 @@ const (
 
 // NewDeserializer creates a new Deserializer with default recursion limit.
 func NewDeserializer() *Deserializer {
-	return &Deserializer{
-		objRefs:  make(map[int]interface{}),
-		tnRefs:   make(map[int][]string),
-		maxDepth: DefaultMaxRecursionDepth,
-	}
+	return NewDeserializerWithEncryption(nil)
+}
+
+// NewDeserializerWithEncryption creates a new Deserializer with an encryption provider.
+func NewDeserializerWithEncryption(decryptor EncryptionProvider) *Deserializer {
+	return NewDeserializerWithMaxDepthAndEncryption(DefaultMaxRecursionDepth, decryptor)
 }
 
 // NewDeserializerWithMaxDepth creates a new Deserializer with custom recursion limit.
 func NewDeserializerWithMaxDepth(maxDepth int) *Deserializer {
+	return NewDeserializerWithMaxDepthAndEncryption(maxDepth, nil)
+}
+
+// NewDeserializerWithMaxDepthAndEncryption creates a new Deserializer with custom settings.
+func NewDeserializerWithMaxDepthAndEncryption(maxDepth int, decryptor EncryptionProvider) *Deserializer {
 	return &Deserializer{
-		objRefs:  make(map[int]interface{}),
-		tnRefs:   make(map[int][]string),
-		maxDepth: maxDepth,
+		objRefs:   make(map[int]interface{}),
+		tnRefs:    make(map[int][]string),
+		maxDepth:  maxDepth,
+		decryptor: decryptor,
 	}
 }
 
@@ -595,6 +682,43 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 
 	case "Ref": // Reference to existing object
 		return d.deserializeRef(se)
+
+	case "SS": // SecureString
+		var s string
+		if err := d.dec.DecodeElement(&s, &se); err != nil {
+			return nil, err
+		}
+		data, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid base64 in SecureString: %w", err)
+		}
+
+		if d.decryptor != nil {
+			// Decrypt with provider
+			decrypted, err := d.decryptor.Decrypt(data)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt SecureString: %w", err)
+			}
+			// Re-wrap in SecureString (using local protection if needed, or keeping raw if desired)
+			// For now, assume d.decryptor returns raw bytes that we want to protect locally?
+			// OR assume d.decryptor returns the bytes that should be stored inside SecureString.
+			// Actually, objects.NewSecureStringFromEncrypted expects bytes that *are* the internal representation.
+			// If d.decryptor returns Plaintext, we should use objects.NewSecureString(string(decrypted)).
+			// But for PSRP, the "encrypted" data is usually DPAPI or Session Key encrypted.
+			// If we decrypt it, we have plaintext. We should re-protect it locally.
+			return objects.NewSecureString(string(decrypted))
+		}
+
+		// No provider, assume data is already locally protected or we can't do anything with it
+		// Just store it as is
+		return objects.NewSecureStringFromEncrypted(data), nil
+
+	case "SB": // ScriptBlock
+		var s string
+		if err := d.dec.DecodeElement(&s, &se); err != nil {
+			return nil, err
+		}
+		return &objects.ScriptBlock{Text: s}, nil
 
 	default:
 		// Skip unknown elements
@@ -902,4 +1026,62 @@ func (d *Deserializer) deserializeRef(se xml.StartElement) (interface{}, error) 
 	}
 	d.dec.Skip()
 	return nil, fmt.Errorf("Ref element missing RefId attribute")
+}
+
+// PowerShellToPSObject converts a PowerShell object to a PSObject for serialization
+func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
+	cmds := make([]interface{}, len(p.Commands))
+	for i, c := range p.Commands {
+		cmds[i] = CommandToPSObject(&c)
+	}
+
+	obj := &PSObject{
+		TypeNames:  []string{"Microsoft.PowerShell.Commands.PowerShellCmdlet+PowerShell", "System.Object"},
+		Properties: make(map[string]interface{}),
+	}
+	obj.ToString = "Microsoft.PowerShell.Commands.PowerShellCmdlet+PowerShell"
+
+	// Property names must match what PSRP expects.
+	// Based on standard PowerShell behavior:
+	obj.Properties["Cmds"] = cmds // "Cmds" is used in PSRP for the list of commands
+	obj.Properties["IsNested"] = p.IsNested
+	obj.Properties["History"] = p.History
+
+	return obj
+}
+
+// CommandToPSObject converts a Command object to a PSObject for serialization
+func CommandToPSObject(c *objects.Command) *PSObject {
+	params := make([]interface{}, len(c.Parameters))
+	for i, p := range c.Parameters {
+		params[i] = CommandParameterToPSObject(&p)
+	}
+
+	obj := &PSObject{
+		TypeNames:  []string{"System.Management.Automation.Runspaces.Command", "System.Object"},
+		Properties: make(map[string]interface{}),
+	}
+	obj.ToString = c.Name
+
+	obj.Properties["Cmdlet"] = c.Name
+	obj.Properties["IsScript"] = c.IsScript
+	obj.Properties["UseLocalScope"] = c.UseLocalScope
+	obj.Properties["MergeMyResult"] = c.MergeMyResult
+	obj.Properties["Parameters"] = params // Or "Args"? PSRP XML usually shows <Obj N="Parameters">
+
+	return obj
+}
+
+// CommandParameterToPSObject converts a CommandParameter to a PSObject for serialization
+func CommandParameterToPSObject(p *objects.CommandParameter) *PSObject {
+	obj := &PSObject{
+		TypeNames:  []string{"System.Management.Automation.Runspaces.CommandParameter", "System.Object"},
+		Properties: make(map[string]interface{}),
+	}
+	obj.ToString = p.Name
+
+	obj.Properties["Name"] = p.Name
+	obj.Properties["Value"] = p.Value
+
+	return obj
 }

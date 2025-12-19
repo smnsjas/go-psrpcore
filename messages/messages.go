@@ -301,6 +301,17 @@ func NewPipelineOutput(runspaceID, pipelineID uuid.UUID, data []byte) *Message {
 	}
 }
 
+// NewGetCommandMetadata creates a GET_COMMAND_METADATA message.
+func NewGetCommandMetadata(runspaceID uuid.UUID, data []byte) *Message {
+	return &Message{
+		Destination: DestinationServer,
+		Type:        MessageTypeGetCommandMetadata,
+		RunspaceID:  runspaceID,
+		PipelineID:  uuid.Nil,
+		Data:        data,
+	}
+}
+
 // PipelineState represents the state of a pipeline.
 type PipelineState int32
 

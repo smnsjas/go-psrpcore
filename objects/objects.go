@@ -128,6 +128,27 @@ func (s *SecureString) Decrypt() ([]byte, error) {
 	return gcm.Open(nil, nonce, ciphertext, nil)
 }
 
+// NewSecureStringFromEncrypted creates a SecureString from already encrypted bytes.
+// This is used during deserialization when an EncryptionProvider has handled the decryption
+// (or preservation) of the data.
+func NewSecureStringFromEncrypted(encrypted []byte) *SecureString {
+	// Copy buffer to avoid retaining reference
+	buf := make([]byte, len(encrypted))
+	copy(buf, encrypted)
+	return &SecureString{
+		encrypted: buf,
+	}
+}
+
+// EncryptedBytes returns the raw encrypted bytes.
+// This is used during serialization to pass data to the EncryptionProvider.
+func (s *SecureString) EncryptedBytes() []byte {
+	// Return a copy to ensure safety
+	buf := make([]byte, len(s.encrypted))
+	copy(buf, s.encrypted)
+	return buf
+}
+
 // Clear securely clears the SecureString from memory.
 func (s *SecureString) Clear() {
 	for i := range s.encrypted {
@@ -140,47 +161,47 @@ func (s *SecureString) Clear() {
 
 // ErrorRecord represents a PowerShell ErrorRecord.
 type ErrorRecord struct {
-	Exception              ExceptionInfo
-	TargetObject           interface{}
-	FullyQualifiedErrorId  string
-	InvocationInfo         *InvocationInfo
-	CategoryInfo           CategoryInfo
-	ErrorDetails           *ErrorDetails
-	PipelineIterationInfo  []int
-	ScriptStackTrace       string
+	Exception             ExceptionInfo
+	TargetObject          interface{}
+	FullyQualifiedErrorId string
+	InvocationInfo        *InvocationInfo
+	CategoryInfo          CategoryInfo
+	ErrorDetails          *ErrorDetails
+	PipelineIterationInfo []int
+	ScriptStackTrace      string
 }
 
 // ExceptionInfo contains exception details.
 type ExceptionInfo struct {
-	Type       string
-	Message    string
-	StackTrace string
+	Type           string
+	Message        string
+	StackTrace     string
 	InnerException *ExceptionInfo
 }
 
 // InvocationInfo contains command invocation details.
 type InvocationInfo struct {
-	MyCommand          string
-	BoundParameters    map[string]interface{}
-	UnboundArguments   []interface{}
-	ScriptLineNumber   int
-	OffsetInLine       int
-	HistoryId          int64
-	ScriptName         string
-	Line               string
-	PositionMessage    string
-	PSScriptRoot       string
-	PSCommandPath      string
-	InvocationName     string
+	MyCommand        string
+	BoundParameters  map[string]interface{}
+	UnboundArguments []interface{}
+	ScriptLineNumber int
+	OffsetInLine     int
+	HistoryId        int64
+	ScriptName       string
+	Line             string
+	PositionMessage  string
+	PSScriptRoot     string
+	PSCommandPath    string
+	InvocationName   string
 }
 
 // CategoryInfo contains error category information.
 type CategoryInfo struct {
-	Category       ErrorCategory
-	Activity       string
-	Reason         string
-	TargetName     string
-	TargetType     string
+	Category   ErrorCategory
+	Activity   string
+	Reason     string
+	TargetName string
+	TargetType string
 }
 
 // ErrorCategory represents PowerShell error categories.
@@ -223,20 +244,20 @@ const (
 
 // ErrorDetails contains additional error details.
 type ErrorDetails struct {
-	Message             string
-	RecommendedAction   string
+	Message           string
+	RecommendedAction string
 }
 
 // ProgressRecord represents a PowerShell progress update.
 type ProgressRecord struct {
-	ActivityId         int
-	ParentActivityId   int
-	Activity           string
-	StatusDescription  string
-	CurrentOperation   string
-	PercentComplete    int
-	SecondsRemaining   int
-	RecordType         ProgressRecordType
+	ActivityId        int
+	ParentActivityId  int
+	Activity          string
+	StatusDescription string
+	CurrentOperation  string
+	PercentComplete   int
+	SecondsRemaining  int
+	RecordType        ProgressRecordType
 }
 
 // ProgressRecordType indicates the type of progress record.
@@ -249,15 +270,15 @@ const (
 
 // InformationRecord represents a PowerShell information record.
 type InformationRecord struct {
-	MessageData            interface{}
-	Source                 string
-	TimeGenerated          string
-	Tags                   []string
-	User                   string
-	Computer               string
-	ProcessId              uint32
-	NativeThreadId         uint32
-	ManagedThreadId        int
+	MessageData     interface{}
+	Source          string
+	TimeGenerated   string
+	Tags            []string
+	User            string
+	Computer        string
+	ProcessId       uint32
+	NativeThreadId  uint32
+	ManagedThreadId int
 }
 
 // DebugRecord represents a PowerShell debug message.
@@ -272,8 +293,79 @@ type VerboseRecord struct {
 	InvocationInfo *InvocationInfo
 }
 
-// WarningRecord represents a PowerShell warning message.
-type WarningRecord struct {
-	Message        string
-	InvocationInfo *InvocationInfo
+// ScriptBlock represents a PowerShell ScriptBlock.
+// Serialization: <SB>text</SB>
+type ScriptBlock struct {
+	Text string
+}
+
+// String returns the script block text.
+func (s ScriptBlock) String() string {
+	return s.Text
+}
+
+// CommandParameter represents a parameter for a PowerShell command.
+type CommandParameter struct {
+	Name  string
+	Value interface{}
+}
+
+// Command represents a single PowerShell command (cmdlet or script).
+type Command struct {
+	Name          string
+	IsScript      bool
+	UseLocalScope bool
+	MergeMyResult string // "None", "Error", "All"
+	Parameters    []CommandParameter
+}
+
+// PowerShell represents a pipeline of commands to be executed.
+// This structure corresponds to the serialized object graph sent in CREATE_PIPELINE.
+type PowerShell struct {
+	Commands []Command
+	IsNested bool
+	History  string // "Add", "Clear", "None"
+}
+
+// NewPowerShell creates a new PowerShell pipeline object.
+func NewPowerShell() *PowerShell {
+	return &PowerShell{
+		Commands: make([]Command, 0),
+		History:  "None",
+	}
+}
+
+// AddCommand adds a command to the pipeline.
+func (p *PowerShell) AddCommand(name string, isScript bool) {
+	p.Commands = append(p.Commands, Command{
+		Name:          name,
+		IsScript:      isScript,
+		MergeMyResult: "None",
+		Parameters:    make([]CommandParameter, 0),
+	})
+}
+
+// AddParameter adds a parameter to the last command in the pipeline.
+func (p *PowerShell) AddParameter(name string, value interface{}) {
+	if len(p.Commands) == 0 {
+		return
+	}
+	idx := len(p.Commands) - 1
+	p.Commands[idx].Parameters = append(p.Commands[idx].Parameters, CommandParameter{
+		Name:  name,
+		Value: value,
+	})
+}
+
+// ParameterMetadata represents metadata for a command parameter.
+type ParameterMetadata struct {
+	Name string
+	Type string // e.g., "System.String"
+}
+
+// CommandMetadata represents metadata for a discovered command.
+type CommandMetadata struct {
+	Name        string
+	CommandType int // 1=Alias, 2=Function, 4=Filter, 8=Cmdlet
+	Parameters  map[string]ParameterMetadata
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/smnsjas/go-psrpcore/host"
 	"github.com/smnsjas/go-psrpcore/messages"
+	"github.com/smnsjas/go-psrpcore/objects"
 	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
@@ -70,7 +71,9 @@ type Pipeline struct {
 	runspaceID uuid.UUID
 	state      State
 	transport  Transport
-	command    string
+
+	// powerShell represents the pipeline definition (commands and parameters)
+	powerShell *objects.PowerShell
 
 	// Channels for streams
 	outputCh chan *messages.Message
@@ -83,17 +86,63 @@ type Pipeline struct {
 }
 
 // New creates a new Pipeline attached to the given transport.
+// command can be a raw script, which will be wrapped in a PowerShell object.
 func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
+	ps := objects.NewPowerShell()
+	// Default to treating input as a script
+	ps.AddCommand(command, true)
+
 	return &Pipeline{
 		id:         uuid.New(),
 		runspaceID: runspaceID,
 		state:      StateNotStarted,
 		transport:  transport,
-		command:    command,
+		powerShell: ps,
 		outputCh:   make(chan *messages.Message, 100), // Buffered to prevent blocking
 		errorCh:    make(chan *messages.Message, 100),
 		doneCh:     make(chan struct{}),
 	}
+}
+
+// NewBuilder creates a new Pipeline with an empty command list.
+// Use AddCommand/AddParameter to build the pipeline.
+func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
+	return &Pipeline{
+		id:         uuid.New(),
+		runspaceID: runspaceID,
+		state:      StateNotStarted,
+		transport:  transport,
+		powerShell: objects.NewPowerShell(),
+		outputCh:   make(chan *messages.Message, 100),
+		errorCh:    make(chan *messages.Message, 100),
+		doneCh:     make(chan struct{}),
+	}
+}
+
+// AddCommand adds a cmdlet or script to the pipeline.
+// isScript should be true if name is a script block or raw script code.
+func (p *Pipeline) AddCommand(name string, isScript bool) *Pipeline {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.powerShell.AddCommand(name, isScript)
+	return p
+}
+
+// AddParameter adds a named parameter to the last added command.
+func (p *Pipeline) AddParameter(name string, value interface{}) *Pipeline {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.powerShell.AddParameter(name, value)
+	return p
+}
+
+// AddArgument adds a positional argument (unnamed parameter) to the last added command.
+func (p *Pipeline) AddArgument(value interface{}) *Pipeline {
+	// Positional arguments are just parameters with empty names in some contexts,
+	// but strictly speaking PSRP often treats them as parameters with no name in the list.
+	// We'll reuse AddParameter with empty name which is common convention or check implementation details.
+	// For now, empty string name implies positional.
+	return p.AddParameter("", value)
 }
 
 // ID returns the unique identifier of the pipeline.
@@ -119,12 +168,13 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 	p.mu.Unlock()
 
 	// Create CREATE_PIPELINE message
-	// TODO: Properly serialize command to CLIXML
-	// For now, we'll assume the command string is sufficient for a placeholder
-	// In reality, this needs to be a PowerShell object
-	// We will revisit this when we implement the full serializer integration
-	// But for the state machine logic, this is fine.
-	cmdData := []byte(p.command)
+	// Serialize the PowerShell object to CLIXML
+	serializer := serialization.NewSerializer()
+	cmdData, err := serializer.Serialize(p.powerShell)
+	if err != nil {
+		p.transition(StateFailed, err)
+		return fmt.Errorf("serialize command: %w", err)
+	}
 
 	msg := messages.NewCreatePipeline(p.runspaceID, p.id, cmdData)
 	if err := p.transport.SendMessage(ctx, msg); err != nil {

@@ -57,7 +57,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jasonmfehr/go-psrp/objects"
+	"github.com/smnsjas/go-psrpcore/objects"
 )
 
 // CLIXML namespace and version.

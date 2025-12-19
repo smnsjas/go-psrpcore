@@ -3,7 +3,7 @@ package host
 import (
 	"testing"
 
-	"github.com/jasonmfehr/go-psrp/objects"
+	"github.com/smnsjas/go-psrpcore/objects"
 )
 
 // mockHost implements Host for testing

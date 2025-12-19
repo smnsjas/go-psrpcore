@@ -369,3 +369,17 @@ type CommandMetadata struct {
 	CommandType int // 1=Alias, 2=Function, 4=Filter, 8=Cmdlet
 	Parameters  map[string]ParameterMetadata
 }
+
+// Version represents a numeric version (Major.Minor.Build.Revision).
+// Serialization: <Version>1.2.3.4</Version>
+type Version struct {
+	Major    int
+	Minor    int
+	Build    int
+	Revision int
+}
+
+// String returns the string representation of the version (e.g., "1.0.0.0").
+func (v Version) String() string {
+	return fmt.Sprintf("%d.%d.%d.%d", v.Major, v.Minor, v.Build, v.Revision)
+}

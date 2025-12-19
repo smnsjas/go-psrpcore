@@ -199,8 +199,8 @@ func (s *Serializer) addObjRef(v interface{}, refID int) {
 func (s *Serializer) Serialize(v interface{}) ([]byte, error) {
 	s.buf.Reset()
 
-	// Write XML header
-	s.buf.WriteString(xml.Header)
+	// Omit XML header for PSRP payloads as they are usually fragments or wrapped
+	// s.buf.WriteString(xml.Header)
 
 	// Write root Objs element
 	s.buf.WriteString(`<Objs Version="` + CLIXMLVersion + `" xmlns="` + CLIXMLNamespace + `">`)
@@ -389,6 +389,20 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 
 	case *objects.CommandParameter:
 		return s.serializePSObject(CommandParameterToPSObject(val), name)
+
+	case objects.Version:
+		s.buf.WriteString("<Version")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(val.String())
+		s.buf.WriteString("</Version>")
+
+	case *objects.Version:
+		s.buf.WriteString("<Version")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(val.String())
+		s.buf.WriteString("</Version>")
 
 	default:
 		// Handle generic slices/arrays
@@ -704,28 +718,47 @@ func (d *Deserializer) Reset() {
 
 // Deserialize converts CLIXML bytes to Go values.
 func (d *Deserializer) Deserialize(data []byte) ([]interface{}, error) {
+	// Strip UTF-8 BOM if present
+	if len(data) >= 3 && data[0] == 0xef && data[1] == 0xbb && data[2] == 0xbf {
+		data = data[3:]
+	}
+
 	d.dec = xml.NewDecoder(bytes.NewReader(data))
 
-	// Find root Objs element
+	// Find root element (Objs or single Obj)
+	var root xml.StartElement
 	for {
 		tok, err := d.dec.Token()
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidCLIXML, err)
 		}
 
-		if se, ok := tok.(xml.StartElement); ok && se.Name.Local == "Objs" {
+		if se, ok := tok.(xml.StartElement); ok {
+			root = se
 			break
 		}
 	}
 
 	var results []interface{}
-	for {
-		val, done, err := d.deserializeNext()
+
+	if root.Name.Local == "Objs" {
+		// Standard list wrapper <Objs>...</Objs>
+		for {
+			val, done, err := d.deserializeNext()
+			if err != nil {
+				return nil, err
+			}
+			if done {
+				break
+			}
+			results = append(results, val)
+		}
+	} else {
+		// Single root object, e.g. <Obj>...</Obj>
+		// We already consumed the StartElement, so decode it directly.
+		val, err := d.deserializeElement(root)
 		if err != nil {
 			return nil, err
-		}
-		if done {
-			break
 		}
 		results = append(results, val)
 	}
@@ -880,6 +913,13 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 			return nil, fmt.Errorf("decode script block: %w", err)
 		}
 		return &objects.ScriptBlock{Text: s}, nil
+
+	case "Version": // Version (e.g. used in capabilities)
+		var s string
+		if err := d.dec.DecodeElement(&s, &se); err != nil {
+			return nil, fmt.Errorf("decode version: %w", err)
+		}
+		return s, nil
 
 	default:
 		// Skip unknown elements

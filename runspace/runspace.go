@@ -56,6 +56,7 @@ import (
 	"github.com/jasonmfehr/go-psrp/fragments"
 	"github.com/jasonmfehr/go-psrp/host"
 	"github.com/jasonmfehr/go-psrp/messages"
+	"github.com/jasonmfehr/go-psrp/pipeline"
 	"github.com/jasonmfehr/go-psrp/serialization"
 )
 
@@ -129,17 +130,19 @@ type Pool struct {
 	assembler  *fragments.Assembler
 
 	// Negotiated capabilities
-	serverProtocolVersion   string
-	serverPSVersion         string
-	negotiatedMaxRunspaces  int
-	negotiatedMinRunspaces  int
+	serverProtocolVersion  string
+	serverPSVersion        string
+	negotiatedMaxRunspaces int
+	negotiatedMinRunspaces int
 
 	// Host callback handling
 	hostCallbackHandler *host.CallbackHandler
 
+	// Pipelines
+	pipelines map[uuid.UUID]*pipeline.Pipeline
+
 	// Channels for message processing
 	stateCh chan State
-	errCh   chan error
 }
 
 // New creates a new RunspacePool with the given transport and ID.
@@ -154,8 +157,8 @@ func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 		fragmenter:          fragments.NewFragmenter(32768), // Default max fragment size
 		assembler:           fragments.NewAssembler(),
 		hostCallbackHandler: host.NewCallbackHandler(host.NewNullHost()),
+		pipelines:           make(map[uuid.UUID]*pipeline.Pipeline),
 		stateCh:             make(chan State, 1),
-		errCh:               make(chan error, 1),
 	}
 }
 
@@ -271,6 +274,9 @@ func (p *Pool) Open(ctx context.Context) error {
 		p.setBroken()
 		return fmt.Errorf("wait for opened: %w", err)
 	}
+
+	// Start message dispatch loop
+	go p.dispatchLoop(ctx)
 
 	return nil
 }
@@ -438,6 +444,73 @@ func (p *Pool) waitForOpened(ctx context.Context) error {
 	p.mu.Unlock()
 
 	return nil
+}
+
+// SendMessage sends a PSRP message to the server (implements pipeline.Transport).
+func (p *Pool) SendMessage(ctx context.Context, msg *messages.Message) error {
+	return p.sendMessage(ctx, msg)
+}
+
+// CreatePipeline creates a new pipeline in the runspace pool.
+func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state != StateOpened {
+		return nil, ErrNotOpen
+	}
+
+	pl := pipeline.New(p, p.id, command)
+	p.pipelines[pl.ID()] = pl
+
+	return pl, nil
+}
+
+// dispatchLoop processes incoming messages and routes them to pipelines.
+func (p *Pool) dispatchLoop(ctx context.Context) {
+	for {
+		// Check if closed
+		p.mu.RLock()
+		state := p.state
+		p.mu.RUnlock()
+		if state == StateClosed || state == StateBroken {
+			return
+		}
+
+		msg, err := p.receiveMessage(ctx)
+		if err != nil {
+			// TODO: Handle disconnection/error
+			// For now, simple exit (or maybe set Broken)
+			return
+		}
+
+		// Dispatch based on PipelineID
+		if msg.PipelineID != uuid.Nil {
+			p.mu.RLock()
+			pl, exists := p.pipelines[msg.PipelineID]
+			p.mu.RUnlock()
+
+			if exists {
+				// Non-blocking handle?
+				// HandleMessage in pipeline should be fast (just channel send)
+				_ = pl.HandleMessage(msg)
+			}
+			continue
+		}
+
+		// Runspace-level messages
+		switch msg.Type {
+		case messages.MessageTypeRunspaceHostCall:
+			// Dispatch host call in background to not block loop
+			go func() {
+				if err := p.handleHostCall(ctx, msg); err != nil {
+					// Log error?
+				}
+			}()
+		case messages.MessageTypeRunspacePoolState:
+			// Handle state changes if any (e.g. Broken/Closed from server)
+		}
+	}
 }
 
 // sendMessage sends a PSRP message through the transport.

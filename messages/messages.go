@@ -56,17 +56,21 @@ type MessageType uint32
 
 // Session and capability message types.
 const (
-	MessageTypeSessionCapability    MessageType = 0x00010002
-	MessageTypeInitRunspacePool     MessageType = 0x00010004
-	MessageTypePublicKey            MessageType = 0x00010005
-	MessageTypeEncryptedSessionKey  MessageType = 0x00010006
-	MessageTypePublicKeyRequest     MessageType = 0x00010007
-	MessageTypeSetMaxRunspaces      MessageType = 0x00010008
-	MessageTypeSetMinRunspaces      MessageType = 0x00010009
-	MessageTypeRunspaceAvailability MessageType = 0x00010010
-	MessageTypeRunspacePoolState    MessageType = 0x00010011
-	MessageTypeApplicationPrivate   MessageType = 0x00010021
-	MessageTypeGetCommandMetadata   MessageType = 0x00010022
+	MessageTypeSessionCapability     MessageType = 0x00010002
+	MessageTypeInitRunspacePool      MessageType = 0x00010004
+	MessageTypePublicKey             MessageType = 0x00010005
+	MessageTypeEncryptedSessionKey   MessageType = 0x00010006
+	MessageTypePublicKeyRequest      MessageType = 0x00010007
+	MessageTypeSetMaxRunspaces       MessageType = 0x00010008
+	MessageTypeSetMinRunspaces       MessageType = 0x00010009
+	MessageTypeGetAvailableRunspaces MessageType = 0x0001000A
+	MessageTypeUserEvent             MessageType = 0x0001000B
+	MessageTypeConnectRunspacePool   MessageType = 0x0001000C
+	MessageTypeRunspacePoolInitData  MessageType = 0x0001000D
+	MessageTypeRunspaceAvailability  MessageType = 0x00010010
+	MessageTypeRunspacePoolState     MessageType = 0x00010011
+	MessageTypeApplicationPrivate    MessageType = 0x00010021
+	MessageTypeGetCommandMetadata    MessageType = 0x00010022
 )
 
 // Pipeline message types.
@@ -252,14 +256,14 @@ func NewInitRunspacePool(runspaceID uuid.UUID, data []byte) *Message {
 type RunspacePoolState int32
 
 const (
-	RunspacePoolStateBeforeOpen RunspacePoolState = 0
-	RunspacePoolStateOpening    RunspacePoolState = 1
-	RunspacePoolStateOpened     RunspacePoolState = 2
-	RunspacePoolStateClosing    RunspacePoolState = 3
-	RunspacePoolStateClosed     RunspacePoolState = 4
-	RunspacePoolStateBroken     RunspacePoolState = 5
+	RunspacePoolStateBeforeOpen   RunspacePoolState = 0
+	RunspacePoolStateOpening      RunspacePoolState = 1
+	RunspacePoolStateOpened       RunspacePoolState = 2
+	RunspacePoolStateClosing      RunspacePoolState = 3
+	RunspacePoolStateClosed       RunspacePoolState = 4
+	RunspacePoolStateBroken       RunspacePoolState = 5
 	RunspacePoolStateDisconnected RunspacePoolState = 6
-	RunspacePoolStateConnecting RunspacePoolState = 7
+	RunspacePoolStateConnecting   RunspacePoolState = 7
 )
 
 // NewRunspacePoolStateMessage creates a RUNSPACEPOOL_STATE message.
@@ -300,12 +304,12 @@ func NewPipelineOutput(runspaceID, pipelineID uuid.UUID, data []byte) *Message {
 type PipelineState int32
 
 const (
-	PipelineStateNotStarted  PipelineState = 0
-	PipelineStateRunning     PipelineState = 1
-	PipelineStateStopping    PipelineState = 2
-	PipelineStateStopped     PipelineState = 3
-	PipelineStateCompleted   PipelineState = 4
-	PipelineStateFailed      PipelineState = 5
+	PipelineStateNotStarted   PipelineState = 0
+	PipelineStateRunning      PipelineState = 1
+	PipelineStateStopping     PipelineState = 2
+	PipelineStateStopped      PipelineState = 3
+	PipelineStateCompleted    PipelineState = 4
+	PipelineStateFailed       PipelineState = 5
 	PipelineStateDisconnected PipelineState = 6
 )
 

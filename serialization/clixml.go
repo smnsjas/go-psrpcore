@@ -426,16 +426,33 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 
 // Deserializer decodes CLIXML to Go values.
 type Deserializer struct {
-	dec     *xml.Decoder
-	objRefs map[int]interface{} // Track deserialized objects by RefId
-	tnRefs  map[int][]string    // Track TypeNames by RefId
+	dec          *xml.Decoder
+	objRefs      map[int]interface{} // Track deserialized objects by RefId
+	tnRefs       map[int][]string    // Track TypeNames by RefId
+	depth        int                 // Current recursion depth
+	maxDepth     int                 // Maximum allowed recursion depth
 }
 
-// NewDeserializer creates a new Deserializer.
+const (
+	// DefaultMaxRecursionDepth is the default limit for CLIXML nesting depth
+	DefaultMaxRecursionDepth = 100
+)
+
+// NewDeserializer creates a new Deserializer with default recursion limit.
 func NewDeserializer() *Deserializer {
 	return &Deserializer{
-		objRefs: make(map[int]interface{}),
-		tnRefs:  make(map[int][]string),
+		objRefs:  make(map[int]interface{}),
+		tnRefs:   make(map[int][]string),
+		maxDepth: DefaultMaxRecursionDepth,
+	}
+}
+
+// NewDeserializerWithMaxDepth creates a new Deserializer with custom recursion limit.
+func NewDeserializerWithMaxDepth(maxDepth int) *Deserializer {
+	return &Deserializer{
+		objRefs:  make(map[int]interface{}),
+		tnRefs:   make(map[int][]string),
+		maxDepth: maxDepth,
 	}
 }
 
@@ -491,6 +508,11 @@ func (d *Deserializer) deserializeNext() (interface{}, bool, error) {
 }
 
 func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, error) {
+	// Check recursion depth before processing complex types
+	if d.depth >= d.maxDepth {
+		return nil, fmt.Errorf("maximum recursion depth exceeded: %d", d.maxDepth)
+	}
+
 	switch se.Name.Local {
 	case "Nil":
 		d.dec.Skip()
@@ -554,13 +576,22 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 		return time.Parse(time.RFC3339Nano, s)
 
 	case "LST": // List
-		return d.deserializeList()
+		d.depth++
+		result, err := d.deserializeList()
+		d.depth--
+		return result, err
 
 	case "DCT": // Dictionary (raw DCT without Obj wrapper)
-		return d.deserializeDict()
+		d.depth++
+		result, err := d.deserializeDict()
+		d.depth--
+		return result, err
 
 	case "Obj": // Complex object
-		return d.deserializeObject(se)
+		d.depth++
+		result, err := d.deserializeObject(se)
+		d.depth--
+		return result, err
 
 	case "Ref": // Reference to existing object
 		return d.deserializeRef(se)

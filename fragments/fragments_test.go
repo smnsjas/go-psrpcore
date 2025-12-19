@@ -215,23 +215,153 @@ func TestAssemblerOutOfOrder(t *testing.T) {
 }
 
 func TestAssemblerDuplicate(t *testing.T) {
-	frag := &Fragment{
+	// Create a multi-fragment message to test duplicate detection
+	frag1 := &Fragment{
 		ObjectID:   1,
 		FragmentID: 0,
 		Start:      true,
-		End:        true,
+		End:        false,
 		Data:       []byte("test"),
+	}
+	frag2 := &Fragment{
+		ObjectID:   1,
+		FragmentID: 1,
+		Start:      false,
+		End:        true,
+		Data:       []byte("data"),
 	}
 
 	a := NewAssembler()
-	_, _, err := a.Add(frag)
+
+	// Add first fragment
+	complete, _, err := a.Add(frag1)
 	if err != nil {
 		t.Fatalf("first Add failed: %v", err)
 	}
+	if complete {
+		t.Fatal("message should not be complete yet")
+	}
 
-	// Adding same fragment again should error
-	_, _, err = a.Add(frag)
+	// Adding same fragment again should error (message not yet complete)
+	_, _, err = a.Add(frag1)
 	if err != ErrDuplicateFragment {
 		t.Errorf("expected ErrDuplicateFragment, got %v", err)
 	}
+
+	// Complete the message
+	complete, result, err := a.Add(frag2)
+	if err != nil {
+		t.Fatalf("second Add failed: %v", err)
+	}
+	if !complete {
+		t.Fatal("message should be complete")
+	}
+	expected := []byte("testdata")
+	if !bytes.Equal(result, expected) {
+		t.Errorf("got %v, want %v", result, expected)
+	}
+
+	// After completion, the message is removed from pending (prevents memory leak)
+	// Adding fragments for the same ObjectID now starts a new message
+	complete, _, err = a.Add(frag1)
+	if err != nil {
+		t.Fatalf("adding fragment after completion should succeed: %v", err)
+	}
+	if complete {
+		t.Fatal("new message should not be complete with just first fragment")
+	}
+}
+
+func TestAssemblerDoSProtection(t *testing.T) {
+	t.Run("max pending messages", func(t *testing.T) {
+		a := NewAssemblerWithLimits(2, 100) // Only allow 2 pending messages
+
+		// Add first message (incomplete)
+		frag1 := &Fragment{
+			ObjectID:   1,
+			FragmentID: 0,
+			Start:      true,
+			End:        false,
+			Data:       []byte("test1"),
+		}
+		_, _, err := a.Add(frag1)
+		if err != nil {
+			t.Fatalf("first message failed: %v", err)
+		}
+
+		// Add second message (incomplete)
+		frag2 := &Fragment{
+			ObjectID:   2,
+			FragmentID: 0,
+			Start:      true,
+			End:        false,
+			Data:       []byte("test2"),
+		}
+		_, _, err = a.Add(frag2)
+		if err != nil {
+			t.Fatalf("second message failed: %v", err)
+		}
+
+		// Third message should be rejected
+		frag3 := &Fragment{
+			ObjectID:   3,
+			FragmentID: 0,
+			Start:      true,
+			End:        false,
+			Data:       []byte("test3"),
+		}
+		_, _, err = a.Add(frag3)
+		if err == nil {
+			t.Fatal("expected error for exceeding max pending messages")
+		}
+		if !bytes.Contains([]byte(err.Error()), []byte("too many pending messages")) {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("max fragments per message", func(t *testing.T) {
+		a := NewAssemblerWithLimits(100, 2) // Only allow 2 fragments per message
+
+		// Add first fragment
+		frag1 := &Fragment{
+			ObjectID:   1,
+			FragmentID: 0,
+			Start:      true,
+			End:        false,
+			Data:       []byte("test1"),
+		}
+		_, _, err := a.Add(frag1)
+		if err != nil {
+			t.Fatalf("first fragment failed: %v", err)
+		}
+
+		// Add second fragment
+		frag2 := &Fragment{
+			ObjectID:   1,
+			FragmentID: 1,
+			Start:      false,
+			End:        false,
+			Data:       []byte("test2"),
+		}
+		_, _, err = a.Add(frag2)
+		if err != nil {
+			t.Fatalf("second fragment failed: %v", err)
+		}
+
+		// Third fragment should be rejected
+		frag3 := &Fragment{
+			ObjectID:   1,
+			FragmentID: 2,
+			Start:      false,
+			End:        true,
+			Data:       []byte("test3"),
+		}
+		_, _, err = a.Add(frag3)
+		if err == nil {
+			t.Fatal("expected error for exceeding max fragments")
+		}
+		if !bytes.Contains([]byte(err.Error()), []byte("too many fragments")) {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }

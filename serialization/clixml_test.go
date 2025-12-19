@@ -1,6 +1,7 @@
 package serialization
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -618,4 +619,69 @@ func TestErrorRecordSerialization(t *testing.T) {
 	if exception.Properties["Message"] != "Something went wrong" {
 		t.Errorf("Exception.Message: got %v, want %v", exception.Properties["Message"], "Something went wrong")
 	}
+}
+
+func TestDeserializerRecursionDepthProtection(t *testing.T) {
+	// Create deeply nested XML that would cause stack overflow without protection
+	buildNestedXML := func(depth int) string {
+		xml := `<?xml version="1.0" encoding="UTF-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">`
+
+		// Start the first object
+		xml += `<Obj RefId="0"><TN RefId="0"><T>Level0</T></TN><Props>`
+
+		// Build nested structure (skip i=0 since we already started it)
+		for i := 1; i < depth; i++ {
+			xml += `<Obj N="Child" RefId="` + fmt.Sprintf("%d", i) + `"><TN RefId="` + fmt.Sprintf("%d", i) + `"><T>Level` + fmt.Sprintf("%d", i) + `</T></TN><Props>`
+		}
+
+		// Add the deepest value
+		xml += `<S N="Value">deepest</S>`
+
+		// Close all tags
+		for i := 0; i < depth; i++ {
+			xml += `</Props></Obj>`
+		}
+		xml += `</Objs>`
+		return xml
+	}
+
+	t.Run("within limit", func(t *testing.T) {
+		// Create nested structure within default limit (100)
+		xml := buildNestedXML(50)
+
+		d := NewDeserializer()
+		_, err := d.Deserialize([]byte(xml))
+		if err != nil {
+			t.Fatalf("deserialization within limit failed: %v", err)
+		}
+	})
+
+	t.Run("exceeds limit", func(t *testing.T) {
+		// Create nested structure that exceeds default limit
+		xml := buildNestedXML(110)
+
+		d := NewDeserializer()
+		_, err := d.Deserialize([]byte(xml))
+		if err == nil {
+			t.Fatal("expected error for exceeding recursion depth")
+		}
+		if !strings.Contains(err.Error(), "maximum recursion depth exceeded") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("custom limit", func(t *testing.T) {
+		// Test with custom low limit
+		xml := buildNestedXML(15)
+
+		d := NewDeserializerWithMaxDepth(10)
+		_, err := d.Deserialize([]byte(xml))
+		if err == nil {
+			t.Fatal("expected error for exceeding custom recursion depth")
+		}
+		if !strings.Contains(err.Error(), "maximum recursion depth exceeded") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }

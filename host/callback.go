@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jasonmfehr/go-psrp/objects"
+	"github.com/jasonmfehr/go-psrp/serialization"
 )
 
 // MethodID represents a PSHostUserInterface method identifier.
@@ -129,6 +130,130 @@ func (h *CallbackHandler) HandleCall(call *RemoteHostCall) *RemoteHostResponse {
 	return response
 }
 
+// convertToFieldDescriptions converts a parameter to []FieldDescription.
+// Handles lists of PSObjects, individual PSObjects, and native Go []FieldDescription.
+func convertToFieldDescriptions(param interface{}) ([]FieldDescription, error) {
+	var result []FieldDescription
+
+	switch v := param.(type) {
+	case []FieldDescription:
+		// Already the correct type (for tests and direct usage)
+		return v, nil
+	case []interface{}:
+		// List of field descriptions from CLIXML
+		for _, item := range v {
+			fd, err := convertToFieldDescription(item)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, fd)
+		}
+	case *serialization.PSObject:
+		// Single field description
+		fd, err := convertToFieldDescription(v)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, fd)
+	default:
+		return nil, fmt.Errorf("expected list or PSObject for field descriptions, got %T", param)
+	}
+
+	return result, nil
+}
+
+// convertToFieldDescription converts a PSObject or map to FieldDescription.
+func convertToFieldDescription(obj interface{}) (FieldDescription, error) {
+	fd := FieldDescription{}
+
+	var props map[string]interface{}
+	switch v := obj.(type) {
+	case *serialization.PSObject:
+		props = v.Properties
+	case map[string]interface{}:
+		props = v
+	default:
+		return fd, fmt.Errorf("expected PSObject or map for field description, got %T", obj)
+	}
+
+	if name, ok := props["Name"].(string); ok {
+		fd.Name = name
+	}
+	if label, ok := props["Label"].(string); ok {
+		fd.Label = label
+	}
+	if paramType, ok := props["ParameterTypeName"].(string); ok {
+		fd.ParameterTypeName = paramType
+	}
+	if paramFullType, ok := props["ParameterTypeFullName"].(string); ok {
+		fd.ParameterTypeFullName = paramFullType
+	}
+	if help, ok := props["HelpMessage"].(string); ok {
+		fd.HelpMessage = help
+	}
+	if mandatory, ok := props["IsMandatory"].(bool); ok {
+		fd.IsMandatory = mandatory
+	}
+
+	return fd, nil
+}
+
+// convertToChoiceDescriptions converts a parameter to []ChoiceDescription.
+// Handles lists of PSObjects, individual PSObjects, and native Go []ChoiceDescription.
+func convertToChoiceDescriptions(param interface{}) ([]ChoiceDescription, error) {
+	var result []ChoiceDescription
+
+	switch v := param.(type) {
+	case []ChoiceDescription:
+		// Already the correct type (for tests and direct usage)
+		return v, nil
+	case []interface{}:
+		// List of choice descriptions from CLIXML
+		for _, item := range v {
+			cd, err := convertToChoiceDescription(item)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, cd)
+		}
+	case *serialization.PSObject:
+		// Single choice description
+		cd, err := convertToChoiceDescription(v)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, cd)
+	default:
+		return nil, fmt.Errorf("expected list or PSObject for choice descriptions, got %T", param)
+	}
+
+	return result, nil
+}
+
+// convertToChoiceDescription converts a PSObject or map to ChoiceDescription.
+func convertToChoiceDescription(obj interface{}) (ChoiceDescription, error) {
+	cd := ChoiceDescription{}
+
+	var props map[string]interface{}
+	switch v := obj.(type) {
+	case *serialization.PSObject:
+		props = v.Properties
+	case map[string]interface{}:
+		props = v
+	default:
+		return cd, fmt.Errorf("expected PSObject or map for choice description, got %T", obj)
+	}
+
+	if label, ok := props["Label"].(string); ok {
+		cd.Label = label
+	}
+	if help, ok := props["HelpMessage"].(string); ok {
+		cd.HelpMessage = help
+	}
+
+	return cd, nil
+}
+
 // handleReadLine processes ReadLine method calls.
 // Parameters: none
 // Returns: string
@@ -243,8 +368,10 @@ func (h *CallbackHandler) handlePrompt(call *RemoteHostCall) (interface{}, error
 	}
 
 	// Convert parameter 2 to []FieldDescription
-	// TODO: Implement proper deserialization from CLIXML
-	descriptions := []FieldDescription{}
+	descriptions, err := convertToFieldDescriptions(call.MethodParameters[2])
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert field descriptions: %w", err)
+	}
 
 	if h.host == nil || h.host.UI() == nil {
 		return make(map[string]interface{}), nil
@@ -305,8 +432,10 @@ func (h *CallbackHandler) handlePromptForChoice(call *RemoteHostCall) (interface
 	}
 
 	// Convert parameter 2 to []ChoiceDescription
-	// TODO: Implement proper deserialization from CLIXML
-	choices := []ChoiceDescription{}
+	choices, err := convertToChoiceDescriptions(call.MethodParameters[2])
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert choice descriptions: %w", err)
+	}
 
 	var defaultChoice int
 	switch v := call.MethodParameters[3].(type) {
@@ -332,7 +461,7 @@ func (h *CallbackHandler) handlePromptForChoice(call *RemoteHostCall) (interface
 func (h *CallbackHandler) handlePromptForPassword(call *RemoteHostCall) (interface{}, error) {
 	// PromptForPassword is typically implemented as ReadLineAsSecureString
 	if h.host == nil || h.host.UI() == nil {
-		return objects.NewSecureString(""), nil
+		return objects.NewSecureString("")
 	}
 	return h.host.UI().ReadLineAsSecureString()
 }

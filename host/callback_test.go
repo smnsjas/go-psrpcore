@@ -49,7 +49,7 @@ func (ui *mockHostUI) ReadLine() (string, error) {
 }
 
 func (ui *mockHostUI) ReadLineAsSecureString() (*objects.SecureString, error) {
-	return objects.NewSecureString(ui.readLineResult), nil
+	return objects.NewSecureString(ui.readLineResult)
 }
 
 func (ui *mockHostUI) Write(text string) {

@@ -1,0 +1,153 @@
+# go-psrp
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/jasonmfehr/go-psrp.svg)](https://pkg.go.dev/github.com/jasonmfehr/go-psrp)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jasonmfehr/go-psrp)](https://goreportcard.com/report/github.com/jasonmfehr/go-psrp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Pure Go implementation of the PowerShell Remoting Protocol (PSRP).
+
+## Overview
+
+This library implements the [MS-PSRP](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/) protocol following the **sans-IO** pattern. It handles PSRP protocol logic only—consumers provide their own transport layer.
+
+```
+Your Application
+       │
+       ▼
+┌─────────────┐
+│   go-psrp   │  ◄── Protocol logic (this library)
+└──────┬──────┘
+       │ io.ReadWriter
+       ▼
+┌─────────────┐
+│  Transport  │  ◄── You provide: WSMan, SSH, VMBus, etc.
+└─────────────┘
+```
+
+## Features
+
+- 🔌 **Transport-agnostic** - Works over any bidirectional byte stream
+- 📦 **Full PSRP support** - RunspacePools, Pipelines, Host callbacks
+- 🔄 **Object serialization** - CLIXML encode/decode for PowerShell objects
+- 🔐 **SecureString support** - Encrypted credential handling
+- 📊 **Streaming output** - Progress, Debug, Verbose, Warning, Error, Information records
+
+## Installation
+
+```bash
+go get github.com/jasonmfehr/go-psrp
+```
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "io"
+
+    "github.com/jasonmfehr/go-psrp"
+)
+
+func main() {
+    // You provide the transport (this example assumes you have one)
+    var transport io.ReadWriter = getYourTransport()
+
+    // Create a client
+    client := psrp.NewClient(transport)
+
+    // Open a runspace pool
+    ctx := context.Background()
+    pool, err := client.CreateRunspacePool(ctx)
+    if err != nil {
+        panic(err)
+    }
+    defer pool.Close(ctx)
+
+    // Create and run a PowerShell pipeline
+    ps := pool.CreatePowerShell()
+    ps.AddScript("Get-Process | Select-Object -First 5 Name, Id")
+
+    output, err := ps.Invoke(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    for _, obj := range output {
+        fmt.Printf("%+v\n", obj)
+    }
+}
+```
+
+## Use Cases
+
+This library is designed to be composed with transport implementations:
+
+| Transport | Use Case | Example Project |
+|-----------|----------|-----------------|
+| **AF_HYPERV / VMBus** | PowerShell Direct to Hyper-V VMs | [go-psdirect](https://github.com/jasonmfehr/go-psdirect) |
+| **WSMan / HTTP(S)** | Traditional WinRM remoting | Combine with [masterzen/winrm](https://github.com/masterzen/winrm) |
+| **SSH** | PowerShell Core remoting | Use `golang.org/x/crypto/ssh` |
+| **Named Pipes** | Local PowerShell remoting | Use OS-specific pipe APIs |
+
+## Package Structure
+
+```
+go-psrp/
+├── psrp.go              # Main package - Client, RunspacePool, PowerShell
+├── messages/            # PSRP message type definitions
+├── fragments/           # Message fragmentation/reassembly
+├── serialization/       # CLIXML serialization
+├── objects/             # PowerShell complex objects
+└── host/                # Host callback interface
+```
+
+## Architecture
+
+### Sans-IO Design
+
+This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
+
+- **No network code** - Protocol logic is completely separate from I/O
+- **No goroutines** - Caller controls concurrency
+- **Testable** - Easy to test with mock transports
+- **Composable** - Use with any transport layer
+
+### PSRP Protocol Layers
+
+```
+┌─────────────────────────────────────────┐
+│           PowerShell API                │  High-level commands
+├─────────────────────────────────────────┤
+│           Pipeline Layer                │  Command execution
+├─────────────────────────────────────────┤
+│         RunspacePool Layer              │  Session management
+├─────────────────────────────────────────┤
+│           Message Layer                 │  41 message types
+├─────────────────────────────────────────┤
+│          Fragment Layer                 │  Chunking large messages
+├─────────────────────────────────────────┤
+│        Serialization Layer              │  CLIXML encode/decode
+└─────────────────────────────────────────┘
+```
+
+## Documentation
+
+- [MS-PSRP Protocol Specification](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/)
+- [Package Documentation](https://pkg.go.dev/github.com/jasonmfehr/go-psrp)
+
+## Related Projects
+
+- [psrpcore](https://github.com/jborean93/psrpcore) - Python PSRP implementation (reference)
+- [pypsrp](https://github.com/jborean93/pypsrp) - Python PSRP client with WSMan transport
+- [go-psdirect](https://github.com/jasonmfehr/go-psdirect) - PowerShell Direct for Hyper-V (uses this library)
+
+## Contributing
+
+Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.

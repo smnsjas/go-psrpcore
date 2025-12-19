@@ -304,8 +304,8 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		go func() {
 			// Handle host call in background
 			if err := p.handleHostCall(p.ctx, msg); err != nil {
-				// TODO: Log error or signal failure?
-				_ = err
+				// Signal failure if host call handling failed (likely transport or protocol error)
+				p.transition(StateFailed, fmt.Errorf("handle host call: %w", err))
 			}
 		}()
 	}

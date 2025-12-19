@@ -47,6 +47,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 )
 
 // Fragment header size in bytes.
@@ -92,7 +93,11 @@ func (f *Fragment) Encode() []byte {
 	}
 	buf[16] = flags
 
-	binary.BigEndian.PutUint32(buf[17:21], uint32(len(f.Data)))
+	if len(f.Data) > math.MaxUint32 {
+		// Should never happen with reasonable fragment sizes
+		panic("fragment data too large")
+	}
+	binary.BigEndian.PutUint32(buf[17:21], uint32(len(f.Data))) // #nosec G115 -- length checked against MaxUint32 above
 	copy(buf[21:], f.Data)
 
 	return buf
@@ -250,6 +255,9 @@ func (a *Assembler) Add(f *Fragment) (complete bool, data []byte, err error) {
 	pm.received++
 
 	if f.End {
+		if f.FragmentID > uint64(math.MaxInt-1) {
+			return false, nil, fmt.Errorf("fragment ID too large: %d", f.FragmentID)
+		}
 		pm.total = int(f.FragmentID) + 1
 	}
 
@@ -257,7 +265,8 @@ func (a *Assembler) Add(f *Fragment) (complete bool, data []byte, err error) {
 	if pm.total > 0 && pm.received == pm.total {
 		// Reassemble in order
 		var result []byte
-		for i := uint64(0); i < uint64(pm.total); i++ {
+		total := uint64(pm.total) // #nosec G115 -- pm.total derived safely from positive FragmentID
+		for i := uint64(0); i < total; i++ {
 			result = append(result, pm.fragments[i]...)
 		}
 

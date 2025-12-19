@@ -78,7 +78,6 @@ type Pipeline struct {
 	// Channels for streams
 	outputCh chan *messages.Message
 	errorCh  chan *messages.Message
-	inputCh  chan interface{}
 
 	// Completion
 	doneCh chan struct{}

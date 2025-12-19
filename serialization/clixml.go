@@ -52,6 +52,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -202,7 +203,9 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 	switch val := v.(type) {
 	case string:
 		s.buf.WriteString(fmt.Sprintf("<S%s>", nameAttr))
-		xml.EscapeText(&s.buf, []byte(val))
+		if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
+			return err
+		}
 		s.buf.WriteString("</S>")
 
 	case int:
@@ -278,7 +281,9 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 
 	case *objects.ScriptBlock:
 		s.buf.WriteString(fmt.Sprintf("<SB%s>", nameAttr))
-		xml.EscapeText(&s.buf, []byte(val.Text))
+		if err := xml.EscapeText(&s.buf, []byte(val.Text)); err != nil {
+			return err
+		}
 		s.buf.WriteString("</SB>")
 
 	case *objects.PowerShell:
@@ -370,7 +375,12 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 			invProps["MyCommand"] = err.InvocationInfo.MyCommand
 		}
 		if err.InvocationInfo.ScriptLineNumber > 0 {
-			invProps["ScriptLineNumber"] = int32(err.InvocationInfo.ScriptLineNumber)
+			if err.InvocationInfo.ScriptLineNumber > math.MaxInt32 {
+				// Cap at MaxInt32 if somehow larger
+				invProps["ScriptLineNumber"] = int32(math.MaxInt32)
+			} else {
+				invProps["ScriptLineNumber"] = int32(err.InvocationInfo.ScriptLineNumber) // #nosec G115 -- bounds checked via if/else cap
+			}
 		}
 		if err.InvocationInfo.ScriptName != "" {
 			invProps["ScriptName"] = err.InvocationInfo.ScriptName
@@ -383,7 +393,11 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 
 	// CategoryInfo
 	catProps := make(map[string]interface{})
-	catProps["Category"] = int32(err.CategoryInfo.Category)
+	cat := int(err.CategoryInfo.Category)
+	if cat < math.MinInt32 || cat > math.MaxInt32 {
+		cat = int(objects.ErrorCategoryNotSpecified)
+	}
+	catProps["Category"] = int32(cat) // #nosec G115 -- bounds checked above
 	if err.CategoryInfo.Activity != "" {
 		catProps["Activity"] = err.CategoryInfo.Activity
 	}
@@ -429,7 +443,9 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 			s.buf.WriteString(fmt.Sprintf("<TN RefId=\"%d\">", tnRefID))
 			for _, tn := range obj.TypeNames {
 				s.buf.WriteString("<T>")
-				xml.EscapeText(&s.buf, []byte(tn))
+				if err := xml.EscapeText(&s.buf, []byte(tn)); err != nil {
+					return err
+				}
 				s.buf.WriteString("</T>")
 			}
 			s.buf.WriteString("</TN>")
@@ -439,7 +455,9 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 	// Serialize ToString if present
 	if obj.ToString != "" {
 		s.buf.WriteString("<ToString>")
-		xml.EscapeText(&s.buf, []byte(obj.ToString))
+		if err := xml.EscapeText(&s.buf, []byte(obj.ToString)); err != nil {
+			return err
+		}
 		s.buf.WriteString("</ToString>")
 	}
 
@@ -490,7 +508,9 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 	for k, v := range m {
 		s.buf.WriteString("<En>")
 		s.buf.WriteString("<S N=\"Key\">")
-		xml.EscapeText(&s.buf, []byte(k))
+		if err := xml.EscapeText(&s.buf, []byte(k)); err != nil {
+			return err
+		}
 		s.buf.WriteString("</S>")
 		if err := s.serializeValueWithName(v, "Value"); err != nil {
 			return err
@@ -602,7 +622,9 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 
 	switch se.Name.Local {
 	case "Nil":
-		d.dec.Skip()
+		if err := d.dec.Skip(); err != nil {
+			return nil, err
+		}
 		return nil, nil
 
 	case "S": // String
@@ -722,7 +744,9 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 
 	default:
 		// Skip unknown elements
-		d.dec.Skip()
+		if err := d.dec.Skip(); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 }
@@ -771,7 +795,9 @@ func (d *Deserializer) deserializeDict() (map[string]interface{}, error) {
 				}
 				result[key] = value
 			} else {
-				d.dec.Skip()
+				if err := d.dec.Skip(); err != nil {
+					return nil, err
+				}
 			}
 
 		case xml.EndElement:
@@ -889,7 +915,9 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 						}
 					}
 				}
-				d.dec.Skip()
+				if err := d.dec.Skip(); err != nil {
+					return nil, err
+				}
 
 			case "ToString":
 				var s string
@@ -924,7 +952,9 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 				}
 
 			default:
-				d.dec.Skip()
+				if err := d.dec.Skip(); err != nil {
+					return nil, err
+				}
 			}
 
 		case xml.EndElement:
@@ -1017,15 +1047,21 @@ func (d *Deserializer) deserializeRef(se xml.StartElement) (interface{}, error) 
 				return nil, err
 			}
 			if obj, exists := d.objRefs[refID]; exists {
-				d.dec.Skip()
+				if err := d.dec.Skip(); err != nil {
+					return nil, err
+				}
 				return obj, nil
 			}
-			d.dec.Skip()
+			if err := d.dec.Skip(); err != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("reference to unknown object: RefId=%d", refID)
 		}
 	}
-	d.dec.Skip()
-	return nil, fmt.Errorf("Ref element missing RefId attribute")
+	if err := d.dec.Skip(); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("ref element missing RefId attribute")
 }
 
 // PowerShellToPSObject converts a PowerShell object to a PSObject for serialization

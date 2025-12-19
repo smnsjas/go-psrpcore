@@ -56,6 +56,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,21 +111,67 @@ type objRef struct {
 	refID int
 }
 
+// pool for serializers
+var serializerPool = sync.Pool{
+	New: func() interface{} {
+		s := &Serializer{
+			objRefs: make([]*objRef, 0, 64),
+			tnRefs:  make(map[string]int),
+		}
+		s.enc = xml.NewEncoder(&s.buf)
+		// No indentation for performance in production, but preserving behavior for now or making it optional
+		// s.enc.Indent("", "  ")
+		return s
+	},
+}
+
+// pool for deserializers
+var deserializerPool = sync.Pool{
+	New: func() interface{} {
+		return &Deserializer{
+			objRefs: make(map[int]interface{}),
+			tnRefs:  make(map[int][]string),
+		}
+	},
+}
+
 // NewSerializer creates a new Serializer.
+// It retrieves a serializer from the pool. Release it with Close().
 func NewSerializer() *Serializer {
 	return NewSerializerWithEncryption(nil)
 }
 
 // NewSerializerWithEncryption creates a new Serializer with an encryption provider.
 func NewSerializerWithEncryption(encryptor EncryptionProvider) *Serializer {
-	s := &Serializer{
-		objRefs:   make([]*objRef, 0),
-		tnRefs:    make(map[string]int),
-		encryptor: encryptor,
-	}
-	s.enc = xml.NewEncoder(&s.buf)
+	s := serializerPool.Get().(*Serializer)
+	s.Reset()
+	s.encryptor = encryptor
+	// Ensure encoder is set up if reused buffer reset cleared it (it doesn't, buffer reset is fine)
+	// Re-setting indent just in case
 	s.enc.Indent("", "  ")
 	return s
+}
+
+// Close returns the Serializer to the pool.
+func (s *Serializer) Close() {
+	if s == nil {
+		return
+	}
+	s.Reset()
+	serializerPool.Put(s)
+}
+
+// Reset clears the Serializer state for reuse.
+func (s *Serializer) Reset() {
+	s.buf.Reset()
+	s.refCounter = 0
+	// Keep capacity
+	s.objRefs = s.objRefs[:0]
+	// Clear map
+	for k := range s.tnRefs {
+		delete(s.tnRefs, k)
+	}
+	s.encryptor = nil
 }
 
 // findObjRef searches for an existing object reference
@@ -156,7 +203,7 @@ func (s *Serializer) Serialize(v interface{}) ([]byte, error) {
 	s.buf.WriteString(xml.Header)
 
 	// Write root Objs element
-	s.buf.WriteString(fmt.Sprintf(`<Objs Version="%s" xmlns="%s">`, CLIXMLVersion, CLIXMLNamespace))
+	s.buf.WriteString(`<Objs Version="` + CLIXMLVersion + `" xmlns="` + CLIXMLNamespace + `">`)
 
 	if err := s.serializeValue(v); err != nil {
 		return nil, err
@@ -164,7 +211,11 @@ func (s *Serializer) Serialize(v interface{}) ([]byte, error) {
 
 	s.buf.WriteString("</Objs>")
 
-	return s.buf.Bytes(), nil
+	// Return a copy of the data to ensure safety when the serializer is returned to the pool
+	// The pool reuse clears the buffer, which would invalidate the slice if we returned it directly
+	/// guarding against async usage of the returned slice.
+	// We use append which allocates a new slice of the exact required size.
+	return append([]byte(nil), s.buf.Bytes()...), nil
 }
 
 func (s *Serializer) serializeValue(v interface{}) error {
@@ -187,9 +238,15 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		if refID, exists := s.findObjRef(v); exists {
 			// Object already serialized, emit reference
 			if name != "" {
-				s.buf.WriteString(fmt.Sprintf("<Ref N=\"%s\" RefId=\"%d\"/>", name, refID))
+				s.buf.WriteString(`<Ref N="`)
+				s.buf.WriteString(name)
+				s.buf.WriteString(`" RefId="`)
+				s.buf.WriteString(strconv.Itoa(refID))
+				s.buf.WriteString(`"/>`)
 			} else {
-				s.buf.WriteString(fmt.Sprintf("<Ref RefId=\"%d\"/>", refID))
+				s.buf.WriteString(`<Ref RefId="`)
+				s.buf.WriteString(strconv.Itoa(refID))
+				s.buf.WriteString(`"/>`)
 			}
 			return nil
 		}
@@ -197,49 +254,85 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 
 	nameAttr := ""
 	if name != "" {
-		nameAttr = fmt.Sprintf(" N=\"%s\"", name)
+		// Use manual string concatenation or builder if heavily used, but Sprintf is okay for short strings
+		// Optimization: avoid Sprintf for common case
+		nameAttr = ` N="` + name + `"`
 	}
 
 	switch val := v.(type) {
 	case string:
-		s.buf.WriteString(fmt.Sprintf("<S%s>", nameAttr))
+		s.buf.WriteString("<S")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
 		if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
 			return err
 		}
 		s.buf.WriteString("</S>")
 
 	case int:
-		s.buf.WriteString(fmt.Sprintf("<I32%s>%d</I32>", nameAttr, val))
+		s.buf.WriteString("<I32")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(strconv.FormatInt(int64(val), 10))
+		s.buf.WriteString("</I32>")
 
 	case int32:
-		s.buf.WriteString(fmt.Sprintf("<I32%s>%d</I32>", nameAttr, val))
+		s.buf.WriteString("<I32")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(strconv.FormatInt(int64(val), 10))
+		s.buf.WriteString("</I32>")
 
 	case int64:
-		s.buf.WriteString(fmt.Sprintf("<I64%s>%d</I64>", nameAttr, val))
+		s.buf.WriteString("<I64")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(strconv.FormatInt(val, 10))
+		s.buf.WriteString("</I64>")
 
 	case bool:
+		s.buf.WriteString("<B")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
 		if val {
-			s.buf.WriteString(fmt.Sprintf("<B%s>true</B>", nameAttr))
+			s.buf.WriteString("true")
 		} else {
-			s.buf.WriteString(fmt.Sprintf("<B%s>false</B>", nameAttr))
+			s.buf.WriteString("false")
 		}
+		s.buf.WriteString("</B>")
 
 	case float64:
-		s.buf.WriteString(fmt.Sprintf("<Db%s>%v</Db>", nameAttr, val))
+		s.buf.WriteString("<Db")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(strconv.FormatFloat(val, 'f', -1, 64))
+		s.buf.WriteString("</Db>")
 
 	case []byte:
-		s.buf.WriteString(fmt.Sprintf("<BA%s>", nameAttr))
+		s.buf.WriteString("<BA")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
 		s.buf.WriteString(base64.StdEncoding.EncodeToString(val))
 		s.buf.WriteString("</BA>")
 
 	case time.Time:
-		s.buf.WriteString(fmt.Sprintf("<DT%s>%s</DT>", nameAttr, val.Format(time.RFC3339Nano)))
+		s.buf.WriteString("<DT")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(val.Format(time.RFC3339Nano))
+		s.buf.WriteString("</DT>")
 
 	case uuid.UUID:
-		s.buf.WriteString(fmt.Sprintf("<G%s>%s</G>", nameAttr, val.String()))
+		s.buf.WriteString("<G")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
+		s.buf.WriteString(val.String())
+		s.buf.WriteString("</G>")
 
 	case []interface{}:
-		s.buf.WriteString(fmt.Sprintf("<LST%s>", nameAttr))
+		s.buf.WriteString("<LST")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
 		for _, item := range val {
 			if err := s.serializeValue(item); err != nil {
 				return err
@@ -263,7 +356,9 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		return s.serializePSObject(ErrorRecordToPSObject(val), name)
 
 	case *objects.SecureString:
-		s.buf.WriteString(fmt.Sprintf("<SS%s>", nameAttr))
+		s.buf.WriteString("<SS")
+		s.buf.WriteString(nameAttr)
+		s.buf.WriteString(">")
 		var data []byte
 		if s.encryptor != nil {
 			// Encrypt with provider (Session Key)
@@ -320,7 +415,11 @@ func (s *Serializer) serializeArray(v reflect.Value, name string) error {
 		nameAttr = fmt.Sprintf(" N=\"%s\"", name)
 	}
 
-	s.buf.WriteString(fmt.Sprintf("<Obj%s RefId=\"%d\">", nameAttr, refID))
+	s.buf.WriteString("<Obj")
+	s.buf.WriteString(nameAttr)
+	s.buf.WriteString(` RefId="`)
+	s.buf.WriteString(strconv.Itoa(refID))
+	s.buf.WriteString(`">`)
 	s.buf.WriteString("<TN RefId=\"0\"><T>System.Object[]</T><T>System.Array</T><T>System.Object</T></TN>")
 	s.buf.WriteString("<LST>")
 
@@ -428,19 +527,27 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		nameAttr = fmt.Sprintf(" N=\"%s\"", name)
 	}
 
-	s.buf.WriteString(fmt.Sprintf("<Obj%s RefId=\"%d\">", nameAttr, refID))
+	s.buf.WriteString("<Obj")
+	s.buf.WriteString(nameAttr)
+	s.buf.WriteString(` RefId="`)
+	s.buf.WriteString(strconv.Itoa(refID))
+	s.buf.WriteString(`">`)
 
 	// Serialize TypeNames
 	if len(obj.TypeNames) > 0 {
 		tnKey := strings.Join(obj.TypeNames, "|")
 		if tnRefID, exists := s.tnRefs[tnKey]; exists {
 			// Reference existing TypeNames
-			s.buf.WriteString(fmt.Sprintf("<TNRef RefId=\"%d\"/>", tnRefID))
+			s.buf.WriteString(`<TNRef RefId="`)
+			s.buf.WriteString(strconv.Itoa(tnRefID))
+			s.buf.WriteString(`"/>`)
 		} else {
 			// New TypeNames
 			tnRefID := len(s.tnRefs)
 			s.tnRefs[tnKey] = tnRefID
-			s.buf.WriteString(fmt.Sprintf("<TN RefId=\"%d\">", tnRefID))
+			s.buf.WriteString(`<TN RefId="`)
+			s.buf.WriteString(strconv.Itoa(tnRefID))
+			s.buf.WriteString(`">`)
 			for _, tn := range obj.TypeNames {
 				s.buf.WriteString("<T>")
 				if err := xml.EscapeText(&s.buf, []byte(tn)); err != nil {
@@ -488,16 +595,24 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 		nameAttr = fmt.Sprintf(" N=\"%s\"", name)
 	}
 
-	s.buf.WriteString(fmt.Sprintf("<Obj%s RefId=\"%d\">", nameAttr, refID))
+	s.buf.WriteString("<Obj")
+	s.buf.WriteString(nameAttr)
+	s.buf.WriteString(` RefId="`)
+	s.buf.WriteString(strconv.Itoa(refID))
+	s.buf.WriteString(`">`)
 
 	// TypeNames for Hashtable
 	tnKey := "System.Collections.Hashtable"
 	if tnRefID, exists := s.tnRefs[tnKey]; exists {
-		s.buf.WriteString(fmt.Sprintf("<TNRef RefId=\"%d\"/>", tnRefID))
+		s.buf.WriteString(`<TNRef RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`"/>`)
 	} else {
 		tnRefID := len(s.tnRefs)
 		s.tnRefs[tnKey] = tnRefID
-		s.buf.WriteString(fmt.Sprintf("<TN RefId=\"%d\">", tnRefID))
+		s.buf.WriteString(`<TN RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`">`)
 		s.buf.WriteString("<T>System.Collections.Hashtable</T>")
 		s.buf.WriteString("<T>System.Object</T>")
 		s.buf.WriteString("</TN>")
@@ -555,12 +670,36 @@ func NewDeserializerWithMaxDepth(maxDepth int) *Deserializer {
 
 // NewDeserializerWithMaxDepthAndEncryption creates a new Deserializer with custom settings.
 func NewDeserializerWithMaxDepthAndEncryption(maxDepth int, decryptor EncryptionProvider) *Deserializer {
-	return &Deserializer{
-		objRefs:   make(map[int]interface{}),
-		tnRefs:    make(map[int][]string),
-		maxDepth:  maxDepth,
-		decryptor: decryptor,
+	d := deserializerPool.Get().(*Deserializer)
+	d.Reset()
+	d.maxDepth = maxDepth
+	d.decryptor = decryptor
+	return d
+}
+
+// Close returns the Deserializer to the pool.
+func (d *Deserializer) Close() {
+	if d == nil {
+		return
 	}
+	d.Reset()
+	deserializerPool.Put(d)
+}
+
+// Reset clears the Deserializer state.
+func (d *Deserializer) Reset() {
+	d.dec = nil
+	// Clear map
+	for k := range d.objRefs {
+		delete(d.objRefs, k)
+	}
+	// Clear map
+	for k := range d.tnRefs {
+		delete(d.tnRefs, k)
+	}
+	d.depth = 0
+	d.maxDepth = 0
+	d.decryptor = nil
 }
 
 // Deserialize converts CLIXML bytes to Go values.

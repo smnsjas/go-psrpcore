@@ -263,9 +263,17 @@ func (a *Assembler) Add(f *Fragment) (complete bool, data []byte, err error) {
 
 	// Check if complete
 	if pm.total > 0 && pm.received == pm.total {
+
 		// Reassemble in order
-		var result []byte
 		total := uint64(pm.total) // #nosec G115 -- pm.total derived safely from positive FragmentID
+
+		// Calculate total size to pre-allocate buffer
+		var totalSize int
+		for i := uint64(0); i < total; i++ {
+			totalSize += len(pm.fragments[i])
+		}
+
+		result := make([]byte, 0, totalSize)
 		for i := uint64(0); i < total; i++ {
 			result = append(result, pm.fragments[i]...)
 		}

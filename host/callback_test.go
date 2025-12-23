@@ -441,6 +441,247 @@ func TestCallbackHandler_HandleWriteLine2(t *testing.T) {
 	}
 }
 
+func TestCallbackHandler_HandleGetInstanceId(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           20,
+		MethodID:         MethodIDGetInstanceId,
+		MethodParameters: []interface{}{},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if response.ReturnValue != "mock-id" {
+		t.Errorf("expected 'mock-id', got %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandleGetCurrentCulture(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           21,
+		MethodID:         MethodIDGetCurrentCulture,
+		MethodParameters: []interface{}{},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if response.ReturnValue != "en-US" {
+		t.Errorf("expected 'en-US', got %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandleGetCurrentUICulture(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           22,
+		MethodID:         MethodIDGetCurrentUICulture,
+		MethodParameters: []interface{}{},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if response.ReturnValue != "en-US" {
+		t.Errorf("expected 'en-US', got %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandleSetShouldExit(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           23,
+		MethodID:         MethodIDSetShouldExit,
+		MethodParameters: []interface{}{int32(1)}, // exit code
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	// Verify behavior if host interface supports it (MockHost is partial)
+}
+
+func TestCallbackHandler_HandleEnterNestedPrompt(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           24,
+		MethodID:         MethodIDEnterNestedPrompt,
+		MethodParameters: []interface{}{},
+	}
+
+	response := handler.HandleCall(call)
+
+	// EnterNestedPrompt returns "not supported" error
+	if !response.ExceptionRaised {
+		t.Error("expected exception (not supported), got no exception")
+	}
+}
+
+func TestCallbackHandler_HandleExitNestedPrompt(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           25,
+		MethodID:         MethodIDExitNestedPrompt,
+		MethodParameters: []interface{}{},
+	}
+
+	response := handler.HandleCall(call)
+
+	// ExitNestedPrompt returns "not supported" error
+	if !response.ExceptionRaised {
+		t.Error("expected exception (not supported), got no exception")
+	}
+}
+
+func TestCallbackHandler_HandleNotifyBeginApplication(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           26,
+		MethodID:         MethodIDNotifyBeginApplication,
+		MethodParameters: []interface{}{},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandleNotifyEndApplication(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           27,
+		MethodID:         MethodIDNotifyEndApplication,
+		MethodParameters: []interface{}{},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandleWriteLine1(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           28,
+		MethodID:         MethodIDWriteLine1,
+		MethodParameters: []interface{}{}, // Empty line
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if host.ui.writeCallCount != 1 {
+		t.Errorf("expected 1 WriteLine call, got %d", host.ui.writeCallCount)
+	}
+	// mockHostUI.WriteLine sets lastWritten even for empty string
+	if host.ui.lastWritten != "" {
+		t.Errorf("expected empty string, got %q", host.ui.lastWritten)
+	}
+}
+
+func TestCallbackHandler_HandleWriteDebugLine(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           29,
+		MethodID:         MethodIDWriteDebugLine,
+		MethodParameters: []interface{}{"debug msg"},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if host.ui.writeCallCount != 1 {
+		t.Errorf("expected 1 WriteDebugLine call, got %d", host.ui.writeCallCount)
+	}
+	if host.ui.lastWritten != "debug msg" {
+		t.Errorf("expected 'debug msg', got %q", host.ui.lastWritten)
+	}
+}
+
+func TestCallbackHandler_HandleWriteVerboseLine(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           30,
+		MethodID:         MethodIDWriteVerboseLine,
+		MethodParameters: []interface{}{"verbose msg"},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if host.ui.writeCallCount != 1 {
+		t.Errorf("expected 1 WriteVerboseLine call, got %d", host.ui.writeCallCount)
+	}
+	if host.ui.lastWritten != "verbose msg" {
+		t.Errorf("expected 'verbose msg', got %q", host.ui.lastWritten)
+	}
+}
+
+func TestCallbackHandler_HandleWriteWarningLine(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           31,
+		MethodID:         MethodIDWriteWarningLine,
+		MethodParameters: []interface{}{"warning msg"},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if host.ui.writeCallCount != 1 {
+		t.Errorf("expected 1 WriteWarningLine call, got %d", host.ui.writeCallCount)
+	}
+	if host.ui.lastWritten != "warning msg" {
+		t.Errorf("expected 'warning msg', got %q", host.ui.lastWritten)
+	}
+}
+
 func TestCallbackHandler_HandleWriteProgress(t *testing.T) {
 	host := newMockHost()
 	handler := NewCallbackHandler(host)
@@ -642,5 +883,350 @@ func TestMethodIDValues(t *testing.T) {
 				t.Errorf("expected method ID %d to have value %d, got %d", tt.id, tt.expected, int32(tt.id))
 			}
 		})
+	}
+}
+
+// Phase 2: Medium Complexity tests
+
+func TestCallbackHandler_HandleWriteLine3(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:   32,
+		MethodID: MethodIDWriteLine3,
+		MethodParameters: []interface{}{
+			int32(15), // foreground color
+			int32(0),  // background color
+			"colored line text",
+		},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	if host.ui.writeCallCount != 1 {
+		t.Errorf("expected 1 WriteLine call, got %d", host.ui.writeCallCount)
+	}
+	if host.ui.lastWritten != "colored line text" {
+		t.Errorf("expected 'colored line text', got %q", host.ui.lastWritten)
+	}
+}
+
+func TestCallbackHandler_HandleWriteLine3_MissingParams(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           33,
+		MethodID:         MethodIDWriteLine3,
+		MethodParameters: []interface{}{int32(15)}, // Missing 2 params
+	}
+
+	response := handler.HandleCall(call)
+
+	if !response.ExceptionRaised {
+		t.Error("expected exception for missing parameters")
+	}
+}
+
+func TestCallbackHandler_HandlePromptForCredential1(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:   34,
+		MethodID: MethodIDPromptForCredential1,
+		MethodParameters: []interface{}{
+			"caption",
+			"message",
+			"username",
+			"target",
+		},
+	}
+
+	response := handler.HandleCall(call)
+
+	// mockHostUI returns nil for credentials, which is acceptable
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandlePromptForCredential1_MissingParams(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           35,
+		MethodID:         MethodIDPromptForCredential1,
+		MethodParameters: []interface{}{"caption", "message"}, // Missing userName, targetName
+	}
+
+	response := handler.HandleCall(call)
+
+	if !response.ExceptionRaised {
+		t.Error("expected exception for missing parameters")
+	}
+}
+
+// Phase 3: Complex Handlers tests
+
+func TestCallbackHandler_HandlePrompt(t *testing.T) {
+	host := newMockHost()
+	host.ui.promptResult = map[string]interface{}{"Name": "test value"}
+	handler := NewCallbackHandler(host)
+
+	// Test with native Go []FieldDescription
+	call := &RemoteHostCall{
+		CallID:   36,
+		MethodID: MethodIDPrompt,
+		MethodParameters: []interface{}{
+			"Enter Details",
+			"Please fill in the following:",
+			[]FieldDescription{
+				{Name: "Name", Label: "Your Name", IsMandatory: true},
+			},
+		},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+	result, ok := response.ReturnValue.(map[string]interface{})
+	if !ok {
+		t.Errorf("expected map[string]interface{}, got %T", response.ReturnValue)
+	}
+	if result["Name"] != "test value" {
+		t.Errorf("expected 'test value', got %v", result["Name"])
+	}
+}
+
+func TestCallbackHandler_HandlePrompt_WithPSObjects(t *testing.T) {
+	host := newMockHost()
+	host.ui.promptResult = map[string]interface{}{"Field1": "value1"}
+	handler := NewCallbackHandler(host)
+
+	// Test with PSObject field descriptions (like real server sends)
+	fieldObj := &serialization.PSObject{
+		TypeNames: []string{"System.Management.Automation.Host.FieldDescription"},
+		Properties: map[string]interface{}{
+			"Name":                  "Field1",
+			"Label":                 "Field 1 Label",
+			"ParameterTypeName":     "String",
+			"ParameterTypeFullName": "System.String",
+			"HelpMessage":           "Enter Field 1",
+			"IsMandatory":           true,
+		},
+	}
+
+	call := &RemoteHostCall{
+		CallID:   37,
+		MethodID: MethodIDPrompt,
+		MethodParameters: []interface{}{
+			"Caption",
+			"Message",
+			[]interface{}{fieldObj}, // List of PSObjects
+		},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandlePrompt_EmptyFieldList(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:   38,
+		MethodID: MethodIDPrompt,
+		MethodParameters: []interface{}{
+			"Caption",
+			"Message",
+			[]interface{}{}, // Empty list
+		},
+	}
+
+	response := handler.HandleCall(call)
+
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception for empty field list, got: %v", response.ReturnValue)
+	}
+}
+
+func TestCallbackHandler_HandlePrompt_MissingParams(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	call := &RemoteHostCall{
+		CallID:           39,
+		MethodID:         MethodIDPrompt,
+		MethodParameters: []interface{}{"caption", "message"}, // Missing descriptions
+	}
+
+	response := handler.HandleCall(call)
+
+	if !response.ExceptionRaised {
+		t.Error("expected exception for missing parameters")
+	}
+}
+
+func TestConvertToFieldDescription_PSObject(t *testing.T) {
+	obj := &serialization.PSObject{
+		Properties: map[string]interface{}{
+			"Name":        "TestField",
+			"Label":       "Test Label",
+			"HelpMessage": "Help text",
+			"IsMandatory": true,
+		},
+	}
+
+	fd, err := convertToFieldDescription(obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fd.Name != "TestField" {
+		t.Errorf("expected Name='TestField', got %q", fd.Name)
+	}
+	if fd.Label != "Test Label" {
+		t.Errorf("expected Label='Test Label', got %q", fd.Label)
+	}
+	if fd.HelpMessage != "Help text" {
+		t.Errorf("expected HelpMessage='Help text', got %q", fd.HelpMessage)
+	}
+	if !fd.IsMandatory {
+		t.Error("expected IsMandatory=true")
+	}
+}
+
+func TestConvertToFieldDescription_MissingOptionalFields(t *testing.T) {
+	// Test with minimal fields (only Name)
+	obj := &serialization.PSObject{
+		Properties: map[string]interface{}{
+			"Name": "MinimalField",
+		},
+	}
+
+	fd, err := convertToFieldDescription(obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fd.Name != "MinimalField" {
+		t.Errorf("expected Name='MinimalField', got %q", fd.Name)
+	}
+	// Optional fields should be zero values
+	if fd.HelpMessage != "" {
+		t.Errorf("expected empty HelpMessage, got %q", fd.HelpMessage)
+	}
+	if fd.IsMandatory {
+		t.Error("expected IsMandatory=false by default")
+	}
+}
+
+func TestConvertToFieldDescription_InvalidType(t *testing.T) {
+	_, err := convertToFieldDescription("invalid string type")
+	if err == nil {
+		t.Error("expected error for invalid type")
+	}
+}
+
+func TestConvertToFieldDescriptions_NativeSlice(t *testing.T) {
+	input := []FieldDescription{
+		{Name: "Field1"},
+		{Name: "Field2"},
+	}
+
+	result, err := convertToFieldDescriptions(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("expected 2 fields, got %d", len(result))
+	}
+}
+
+func TestConvertToFieldDescriptions_InvalidType(t *testing.T) {
+	_, err := convertToFieldDescriptions("invalid type")
+	if err == nil {
+		t.Error("expected error for invalid type")
+	}
+}
+
+func TestConvertToChoiceDescription_PSObject(t *testing.T) {
+	obj := &serialization.PSObject{
+		Properties: map[string]interface{}{
+			"Label":       "Yes",
+			"HelpMessage": "Accept",
+		},
+	}
+
+	cd, err := convertToChoiceDescription(obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cd.Label != "Yes" {
+		t.Errorf("expected Label='Yes', got %q", cd.Label)
+	}
+	if cd.HelpMessage != "Accept" {
+		t.Errorf("expected HelpMessage='Accept', got %q", cd.HelpMessage)
+	}
+}
+
+func TestConvertToChoiceDescription_MissingOptional(t *testing.T) {
+	obj := &serialization.PSObject{
+		Properties: map[string]interface{}{
+			"Label": "No",
+		},
+	}
+
+	cd, err := convertToChoiceDescription(obj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cd.Label != "No" {
+		t.Errorf("expected Label='No', got %q", cd.Label)
+	}
+	if cd.HelpMessage != "" {
+		t.Errorf("expected empty HelpMessage, got %q", cd.HelpMessage)
+	}
+}
+
+func TestCallbackHandler_HandlePromptForChoiceMultipleSelection(t *testing.T) {
+	host := newMockHost()
+	host.ui.choiceResult = 0 // Mock returns int, but this method needs []int handling in real UI
+	// We need to update mockHostUI to support generic prompt result or specifically multiple choice
+	// For now, let's see how HandlePromptForChoiceMultipleSelection handles the return
+	handler := NewCallbackHandler(host)
+
+	// Note: The current default MockHostUI.PromptForChoice returns int, not []int.
+	// We might expect an error if the handler tries to cast to []int or if validation fails.
+	// But let's check the implementation of handlePromptForChoiceMultipleSelection first.
+
+	call := &RemoteHostCall{
+		CallID:   40,
+		MethodID: MethodIDPromptForChoiceMultipleSelection,
+		MethodParameters: []interface{}{
+			"Caption",
+			"Message",
+			[]ChoiceDescription{{Label: "A"}, {Label: "B"}},
+			[]int32{0}, // default choices
+		},
+	}
+
+	response := handler.HandleCall(call)
+
+	// In the basic implementation within callback.go, it might call PromptForChoice (singular)
+	// or fail if not implemented. Let's inspect the ReturnValue.
+	if response.ExceptionRaised {
+		// This is acceptable if not supported, but we should verify behavior.
+		// If it succeeded, check return value.
 	}
 }

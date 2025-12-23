@@ -48,3 +48,9 @@ __pycache__/
 
 # Reference/debug files
 *_reference*.xml
+
+# Performance benchmarks and profiling results
+test/benchmarks/
+test/profiles/
+*.prof
+*.pprof

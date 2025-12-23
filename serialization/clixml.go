@@ -94,6 +94,8 @@ var (
 	ErrUnsupportedType = errors.New("unsupported type")
 	// ErrInvalidCLIXML is returned for malformed CLIXML.
 	ErrInvalidCLIXML = errors.New("invalid CLIXML")
+	// ErrMaxRecursionDepth is returned when recursion depth limit is exceeded.
+	ErrMaxRecursionDepth = errors.New("maximum recursion depth exceeded")
 )
 
 // PSObject represents a PowerShell object with type information and properties.
@@ -1183,7 +1185,7 @@ func (d *Deserializer) deserializeNext() (interface{}, bool, error) {
 func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, error) {
 	// Check recursion depth before processing complex types
 	if d.depth >= d.maxDepth {
-		return nil, fmt.Errorf("maximum recursion depth exceeded: %d", d.maxDepth)
+		return nil, fmt.Errorf("%w: depth %d", ErrMaxRecursionDepth, d.maxDepth)
 	}
 
 	switch se.Name.Local {

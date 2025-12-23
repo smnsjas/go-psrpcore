@@ -1,6 +1,7 @@
 package serialization
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -680,8 +681,8 @@ func TestDeserializerRecursionDepthProtection(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for exceeding recursion depth")
 		}
-		if !strings.Contains(err.Error(), "maximum recursion depth exceeded") {
-			t.Errorf("unexpected error: %v", err)
+		if !errors.Is(err, ErrMaxRecursionDepth) {
+			t.Errorf("expected ErrMaxRecursionDepth, got: %v", err)
 		}
 	})
 
@@ -694,8 +695,8 @@ func TestDeserializerRecursionDepthProtection(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for exceeding custom recursion depth")
 		}
-		if !strings.Contains(err.Error(), "maximum recursion depth exceeded") {
-			t.Errorf("unexpected error: %v", err)
+		if !errors.Is(err, ErrMaxRecursionDepth) {
+			t.Errorf("expected ErrMaxRecursionDepth, got: %v", err)
 		}
 	})
 }

@@ -164,8 +164,11 @@ type Pool struct {
 	// Metadata
 	metadataCh chan *messages.Message
 
+	// Concurrency control
+	hostCallLimiter chan struct{}
+
 	// Pipelines
-	pipelines map[uuid.UUID]*pipeline.Pipeline
+	pipelines sync.Map
 
 	// Channels for message processing
 	stateCh    chan State
@@ -194,9 +197,9 @@ func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 		host:                defaultHost,
 		hostCallbackHandler: host.NewCallbackHandler(defaultHost),
 		metadataCh:          make(chan *messages.Message, 1),
+		hostCallLimiter:     make(chan struct{}, 64),        // Limit concurrent host calls
 		fragmenter:          fragments.NewFragmenter(32768), // Default max fragment size
 		assembler:           fragments.NewAssembler(),
-		pipelines:           make(map[uuid.UUID]*pipeline.Pipeline),
 		stateCh:             make(chan State, 1),
 		outgoingCh:          make(chan *messages.Message, 100),
 		readyCh:             make(chan struct{}),
@@ -636,13 +639,13 @@ func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 	}
 
 	pl := pipeline.New(p, p.id, command)
-	p.pipelines[pl.ID()] = pl
+	p.pipelines.Store(pl.ID(), pl)
 
 	// If the transport supports MultiplexedTransport (e.g. OutOfProcess),
 	// we must send a Command creation packet before any pipeline data.
 	if mux, ok := p.transport.(MultiplexedTransport); ok {
 		if err := mux.SendCommand(pl.ID()); err != nil {
-			delete(p.pipelines, pl.ID())
+			p.pipelines.Delete(pl.ID())
 			return nil, fmt.Errorf("send command creation: %w", err)
 		}
 	}
@@ -658,9 +661,7 @@ func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 
 // removePipeline removes a pipeline from the pool's map.
 func (p *Pool) removePipeline(id uuid.UUID) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delete(p.pipelines, id)
+	p.pipelines.Delete(id)
 }
 
 // dispatchLoop processes incoming messages and routes them to pipelines.
@@ -683,11 +684,10 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 
 		// Dispatch based on PipelineID
 		if msg.PipelineID != uuid.Nil {
-			p.mu.RLock()
-			pl, exists := p.pipelines[msg.PipelineID]
-			p.mu.RUnlock()
+			val, exists := p.pipelines.Load(msg.PipelineID)
 
 			if exists {
+				pl := val.(*pipeline.Pipeline)
 				// HandleMessage can block with timeout if pipeline's channel buffers are full.
 				// This provides back-pressure to prevent unbounded memory growth.
 				if err := pl.HandleMessage(msg); err != nil {
@@ -703,12 +703,19 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 		switch msg.Type {
 		case messages.MessageTypeRunspaceHostCall:
 			// Dispatch host call in background to not block loop
-			go func() {
-				if err := p.handleHostCall(ctx, msg); err != nil {
-					// Handling host call failed (likely transport error), pool is likely broken
-					p.handleTransportError(fmt.Errorf("host call failed: %w", err))
-				}
-			}()
+			// Use limiter to prevent unbounded goroutine growth
+			select {
+			case p.hostCallLimiter <- struct{}{}:
+				go func() {
+					defer func() { <-p.hostCallLimiter }()
+					if err := p.handleHostCall(ctx, msg); err != nil {
+						// Handling host call failed (likely transport error), pool is likely broken
+						p.handleTransportError(fmt.Errorf("host call failed: %w", err))
+					}
+				}()
+			case <-ctx.Done():
+				return
+			}
 
 		case messages.MessageTypeRunspacePoolState:
 			// Handle state changes if any (e.g. Broken/Closed from server)
@@ -733,9 +740,11 @@ func (p *Pool) handleTransportError(err error) {
 		p.setState(StateBroken)
 
 		// Close all pipeline channels by transitioning them to failed state
-		for _, pl := range p.pipelines {
+		p.pipelines.Range(func(key, value interface{}) bool {
+			pl := value.(*pipeline.Pipeline)
 			pl.Fail(fmt.Errorf("runspace pool broken: %w", err))
-		}
+			return true
+		})
 
 		// Notify any waiting goroutines
 		close(p.doneCh)

@@ -45,7 +45,7 @@ func BenchmarkSerializeSmallObject(b *testing.B) {
 
 func BenchmarkSerializeMediumObject(b *testing.B) {
 	obj := &serialization.PSObject{
-		TypeNames: []string{"System.Management.Automation.PSCustomObject"},
+		TypeNames:  []string{"System.Management.Automation.PSCustomObject"},
 		Properties: make(map[string]interface{}),
 	}
 	for i := 0; i < 10; i++ {
@@ -68,7 +68,7 @@ func BenchmarkSerializeMediumObject(b *testing.B) {
 
 func BenchmarkSerializeLargeObject(b *testing.B) {
 	obj := &serialization.PSObject{
-		TypeNames: []string{"System.Management.Automation.PSCustomObject"},
+		TypeNames:  []string{"System.Management.Automation.PSCustomObject"},
 		Properties: make(map[string]interface{}),
 	}
 	for i := 0; i < 50; i++ {
@@ -230,10 +230,11 @@ func BenchmarkFragmentDecode(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, err := fragments.Decode(encoded)
+		f, err := fragments.Decode(encoded)
 		if err != nil {
 			b.Fatal(err)
 		}
+		f.Release()
 	}
 }
 

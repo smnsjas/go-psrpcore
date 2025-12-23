@@ -555,12 +555,10 @@ func TestDispatchLoopTransportError(t *testing.T) {
 	}
 
 	// Verify pipeline exists in the map
-	pool.mu.RLock()
-	if _, ok := pool.pipelines[pl.ID()]; !ok {
-		pool.mu.RUnlock()
+	// Verify pipeline exists in the map
+	if _, ok := pool.pipelines.Load(pl.ID()); !ok {
 		t.Fatal("Pipeline not found in pool's pipeline map")
 	}
-	pool.mu.RUnlock()
 
 	// Close the server side to simulate a transport error
 	// This will cause the next receiveMessage to fail with EOF
@@ -1107,12 +1105,9 @@ func TestRunspacePool_PipelineCleanup(t *testing.T) {
 		t.Fatalf("CreatePipeline failed: %v", err)
 	}
 
-	pool.mu.RLock()
-	if _, ok := pool.pipelines[pl.ID()]; !ok {
-		pool.mu.RUnlock()
+	if _, ok := pool.pipelines.Load(pl.ID()); !ok {
 		t.Fatal("Pipeline not found in map immediately after creation")
 	}
-	pool.mu.RUnlock()
 
 	msg := &messages.Message{
 		PipelineID: pl.ID(),
@@ -1127,9 +1122,7 @@ func TestRunspacePool_PipelineCleanup(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	pool.mu.RLock()
-	defer pool.mu.RUnlock()
-	if _, ok := pool.pipelines[pl.ID()]; ok {
+	if _, ok := pool.pipelines.Load(pl.ID()); ok {
 		t.Error("Pipeline was NOT removed from map after completion")
 	}
 }

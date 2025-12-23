@@ -54,6 +54,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,6 +63,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/smnsjas/go-psrpcore/objects"
 )
+
+// PSRPEnum represents a .NET Enum for serialization.
+// It allows serializing an Enum as a complex object with TypeNames, String representation, and Integer value.
+type PSRPEnum struct {
+	Type     string
+	Value    int32
+	ToString string
+}
 
 // CLIXML namespace and version.
 const (
@@ -80,8 +89,15 @@ var (
 type PSObject struct {
 	TypeNames  []string
 	Properties map[string]interface{}
+	Members    map[string]interface{} // Extended properties (MS)
 	// ToString optionally provides a string representation
 	ToString string
+}
+
+// TypedList represents a list with specific TypeNames (for List<PSObject> etc.)
+type TypedList struct {
+	TypeNames []string
+	Items     []interface{}
 }
 
 // PSObjectWithRef wraps a PSObject with reference tracking.
@@ -146,9 +162,8 @@ func NewSerializerWithEncryption(encryptor EncryptionProvider) *Serializer {
 	s := serializerPool.Get().(*Serializer)
 	s.Reset()
 	s.encryptor = encryptor
-	// Ensure encoder is set up if reused buffer reset cleared it (it doesn't, buffer reset is fine)
-	// Re-setting indent just in case
-	s.enc.Indent("", "  ")
+	// NOTE: Do NOT use s.enc.Indent() - PowerShell's OutOfProcess parser
+	// rejects XML with whitespace-only text nodes.
 	return s
 }
 
@@ -218,6 +233,33 @@ func (s *Serializer) Serialize(v interface{}) ([]byte, error) {
 	return append([]byte(nil), s.buf.Bytes()...), nil
 }
 
+// SerializeRaw converts a Go value to CLIXML bytes WITHOUT the <Objs> wrapper.
+// This is used for PSRP message payloads which expect raw serialized objects.
+// Per MS-PSRP, message data contains serialized objects directly, not wrapped in <Objs>.
+func (s *Serializer) SerializeRaw(v interface{}) ([]byte, error) {
+	s.buf.Reset()
+
+	if err := s.serializeValue(v); err != nil {
+		return nil, fmt.Errorf("serialize value: %w", err)
+	}
+
+	return append([]byte(nil), s.buf.Bytes()...), nil
+}
+
+// SerializeMultipleRaw serializes multiple values WITHOUT the <Objs> wrapper.
+// This is used for PSRP messages that contain multiple sequential objects.
+func (s *Serializer) SerializeMultipleRaw(values ...interface{}) ([]byte, error) {
+	s.buf.Reset()
+
+	for _, v := range values {
+		if err := s.serializeValue(v); err != nil {
+			return nil, fmt.Errorf("serialize value: %w", err)
+		}
+	}
+
+	return append([]byte(nil), s.buf.Bytes()...), nil
+}
+
 func (s *Serializer) serializeValue(v interface{}) error {
 	return s.serializeValueWithName(v, "")
 }
@@ -260,6 +302,46 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 	}
 
 	switch val := v.(type) {
+	case *PSRPEnum:
+		// <Obj N="..." RefId="..."><TN RefId="..."><T>Type</T>...</TN><ToString>Str</ToString><I32>Val</I32></Obj>
+		// NOTE: Must use same increment pattern as serializePSObject (get, then increment)
+		refID := s.refCounter
+		s.refCounter++
+
+		s.buf.WriteString("<Obj")
+		s.buf.WriteString(nameAttr) // Handles N="..."
+		s.buf.WriteString(" RefId=\"")
+		s.buf.WriteString(strconv.Itoa(refID))
+		s.buf.WriteString("\">")
+
+		// Create TypeNames key for PSRPEnum
+		tnKey := val.Type + "|System.Enum|System.ValueType|System.Object"
+
+		if tnRefID, exists := s.tnRefs[tnKey]; exists {
+			s.buf.WriteString(`<TNRef RefId="`)
+			s.buf.WriteString(strconv.Itoa(tnRefID))
+			s.buf.WriteString(`"/>`)
+		} else {
+			tnRefID := len(s.tnRefs)
+			s.tnRefs[tnKey] = tnRefID
+
+			s.buf.WriteString("<TN RefId=\"")
+			s.buf.WriteString(strconv.Itoa(tnRefID))
+			s.buf.WriteString("\"><T>")
+			s.buf.WriteString(val.Type)
+			s.buf.WriteString("</T><T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>")
+		}
+
+		s.buf.WriteString("<ToString>")
+		s.buf.WriteString(val.ToString)
+		s.buf.WriteString("</ToString>")
+
+		s.buf.WriteString("<I32>")
+		s.buf.WriteString(strconv.Itoa(int(val.Value)))
+		s.buf.WriteString("</I32>")
+
+		s.buf.WriteString("</Obj>")
+
 	case string:
 		s.buf.WriteString("<S")
 		s.buf.WriteString(nameAttr)
@@ -330,15 +412,7 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		s.buf.WriteString("</G>")
 
 	case []interface{}:
-		s.buf.WriteString("<LST")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		for i, item := range val {
-			if err := s.serializeValue(item); err != nil {
-				return fmt.Errorf("serialize list item %d: %w", i, err)
-			}
-		}
-		s.buf.WriteString("</LST>")
+		return s.serializeArray(reflect.ValueOf(val), name)
 
 	case PSObject:
 		return s.serializePSObject(&val, name)
@@ -348,6 +422,9 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 
 	case map[string]interface{}:
 		return s.serializeHashtable(val, name)
+
+	case map[interface{}]interface{}:
+		return s.serializeGenericMap(val, name)
 
 	case objects.ErrorRecord:
 		return s.serializePSObject(ErrorRecordToPSObject(&val), name)
@@ -404,6 +481,9 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		s.buf.WriteString(val.String())
 		s.buf.WriteString("</Version>")
 
+	case *TypedList:
+		return s.serializeTypedList(val, name)
+
 	default:
 		// Handle generic slices/arrays
 		rVal := reflect.ValueOf(v)
@@ -434,7 +514,29 @@ func (s *Serializer) serializeArray(v reflect.Value, name string) error {
 	s.buf.WriteString(` RefId="`)
 	s.buf.WriteString(strconv.Itoa(refID))
 	s.buf.WriteString(`">`)
-	s.buf.WriteString("<TN RefId=\"0\"><T>System.Object[]</T><T>System.Array</T><T>System.Object</T></TN>")
+
+	// TypeNames for Array
+	typeNames := []string{"System.Object[]", "System.Array", "System.Object"}
+	tnKey := strings.Join(typeNames, "|")
+
+	if tnRefID, exists := s.tnRefs[tnKey]; exists {
+		s.buf.WriteString(`<TNRef RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`"/>`)
+	} else {
+		tnRefID := len(s.tnRefs)
+		s.tnRefs[tnKey] = tnRefID
+		s.buf.WriteString(`<TN RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`">`)
+		for _, tn := range typeNames {
+			s.buf.WriteString("<T>")
+			s.buf.WriteString(tn)
+			s.buf.WriteString("</T>")
+		}
+		s.buf.WriteString("</TN>")
+	}
+
 	s.buf.WriteString("<LST>")
 
 	for i := 0; i < v.Len(); i++ {
@@ -444,6 +546,59 @@ func (s *Serializer) serializeArray(v reflect.Value, name string) error {
 		}
 	}
 
+	s.buf.WriteString("</LST>")
+	s.buf.WriteString("</Obj>")
+	return nil
+}
+
+// serializeTypedList serializes a TypedList with custom TypeNames
+func (s *Serializer) serializeTypedList(list *TypedList, name string) error {
+	// Allocate RefID
+	refID := s.refCounter
+	s.refCounter++
+
+	nameAttr := ""
+	if name != "" {
+		nameAttr = fmt.Sprintf(" N=\"%s\"", name)
+	}
+
+	s.buf.WriteString("<Obj")
+	s.buf.WriteString(nameAttr)
+	s.buf.WriteString(` RefId="`)
+	s.buf.WriteString(strconv.Itoa(refID))
+	s.buf.WriteString(`">`)
+
+	// Write TypeNames using the custom TypeNames from the struct
+	if len(list.TypeNames) > 0 {
+		tnKey := strings.Join(list.TypeNames, "|")
+
+		if tnRefID, exists := s.tnRefs[tnKey]; exists {
+			s.buf.WriteString(`<TNRef RefId="`)
+			s.buf.WriteString(strconv.Itoa(tnRefID))
+			s.buf.WriteString(`"/>`)
+		} else {
+			// Allocate new TN RefID
+			tnRefID := len(s.tnRefs)
+			s.tnRefs[tnKey] = tnRefID
+
+			s.buf.WriteString(`<TN RefId="`)
+			s.buf.WriteString(strconv.Itoa(tnRefID))
+			s.buf.WriteString(`">`)
+			for _, tn := range list.TypeNames {
+				s.buf.WriteString("<T>")
+				s.buf.WriteString(tn)
+				s.buf.WriteString("</T>")
+			}
+			s.buf.WriteString("</TN>")
+		}
+	}
+
+	s.buf.WriteString("<LST>")
+	for i, item := range list.Items {
+		if err := s.serializeValueWithName(item, ""); err != nil {
+			return fmt.Errorf("serialize typed list element %d: %w", i, err)
+		}
+	}
 	s.buf.WriteString("</LST>")
 	s.buf.WriteString("</Obj>")
 	return nil
@@ -529,6 +684,66 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 	}
 }
 
+// serializeGenericMap serializes a generic map as a PowerShell Hashtable (DCT)
+func (s *Serializer) serializeGenericMap(m map[interface{}]interface{}, name string) error {
+	// Allocate RefID for this object
+	refID := s.refCounter
+	s.refCounter++
+	s.addObjRef(m, refID)
+
+	nameAttr := ""
+	if name != "" {
+		nameAttr = fmt.Sprintf(" N=\"%s\"", name)
+	}
+
+	s.buf.WriteString("<Obj")
+	s.buf.WriteString(nameAttr)
+	s.buf.WriteString(` RefId="`)
+	s.buf.WriteString(strconv.Itoa(refID))
+	s.buf.WriteString(`">`)
+
+	// TypeNames for Hashtable
+	typeNames := []string{"System.Collections.Hashtable", "System.Object"}
+	tnKey := strings.Join(typeNames, "|")
+
+	if tnRefID, exists := s.tnRefs[tnKey]; exists {
+		s.buf.WriteString(`<TNRef RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`"/>`)
+	} else {
+		tnRefID := len(s.tnRefs)
+		s.tnRefs[tnKey] = tnRefID
+		s.buf.WriteString(`<TN RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`">`)
+		for _, tn := range typeNames {
+			s.buf.WriteString("<T>")
+			s.buf.WriteString(tn)
+			s.buf.WriteString("</T>")
+		}
+		s.buf.WriteString("</TN>")
+	}
+
+	s.buf.WriteString("<DCT>")
+
+	for k, v := range m {
+		s.buf.WriteString("<En>")
+		// Key (Name is empty string because it's a dictionary entry key, not a property)
+		if err := s.serializeValueWithName(k, "Key"); err != nil {
+			return fmt.Errorf("serialize map key: %w", err)
+		}
+		// Value
+		if err := s.serializeValueWithName(v, "Value"); err != nil {
+			return fmt.Errorf("serialize map value: %w", err)
+		}
+		s.buf.WriteString("</En>")
+	}
+
+	s.buf.WriteString("</DCT>")
+	s.buf.WriteString("</Obj>")
+	return nil
+}
+
 // serializePSObject serializes a PSObject with TypeNames and Properties
 func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 	// Allocate RefID for this object
@@ -582,10 +797,35 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		s.buf.WriteString("</ToString>")
 	}
 
+	// Serialize Members (MS)
+	if len(obj.Members) > 0 {
+		s.buf.WriteString("<MS>")
+		// Sort keys for deterministic output
+		keys := make([]string, 0, len(obj.Members))
+		for k := range obj.Members {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, propName := range keys {
+			propValue := obj.Members[propName]
+			if err := s.serializeValueWithName(propValue, propName); err != nil {
+				return fmt.Errorf("serialize member %s: %w", propName, err)
+			}
+		}
+		s.buf.WriteString("</MS>")
+	}
+
 	// Serialize Properties
 	if len(obj.Properties) > 0 {
 		s.buf.WriteString("<Props>")
-		for propName, propValue := range obj.Properties {
+		// Sort keys for deterministic output
+		keys := make([]string, 0, len(obj.Properties))
+		for k := range obj.Properties {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, propName := range keys {
+			propValue := obj.Properties[propName]
 			if err := s.serializeValueWithName(propValue, propName); err != nil {
 				return fmt.Errorf("serialize property %s: %w", propName, err)
 			}
@@ -1130,6 +1370,17 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 					obj.Properties[k] = v
 				}
 
+			case "LST": // List
+				list, err := d.deserializeList()
+				if err != nil {
+					return nil, err
+				}
+				// Return the list directly
+				if hasRefID {
+					d.objRefs[refID] = list
+				}
+				return list, nil
+
 			default:
 				if err := d.dec.Skip(); err != nil {
 					return nil, err
@@ -1244,25 +1495,86 @@ func (d *Deserializer) deserializeRef(se xml.StartElement) (interface{}, error) 
 }
 
 // PowerShellToPSObject converts a PowerShell object to a PSObject for serialization
+// Structure:
+// Root Object (Generic wrapper)
+//   - Extended Properties (ApartmentState, HostInfo, etc.)
+//   - Property "PowerShell" -> Inner Object (Cmds, History, etc.)
 func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
+	// 1. Create the Inner "PowerShell" object
 	cmds := make([]interface{}, len(p.Commands))
 	for i, c := range p.Commands {
 		cmds[i] = CommandToPSObject(&c)
 	}
 
-	obj := &PSObject{
-		TypeNames:  []string{"Microsoft.PowerShell.Commands.PowerShellCmdlet+PowerShell", "System.Object"},
-		Properties: make(map[string]interface{}),
+	// Wrap cmds in TypedList with correct List<PSObject> TypeNames (per pypsrp/PowerShell reference)
+	// pypsrp lines 440-447: System.Collections.Generic.List`1[[System.Management.Automation.PSObject, ...]]
+	cmdsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
+	cmdsWrapper := &TypedList{
+		TypeNames: []string{cmdsListTypeName, "System.Object"},
+		Items:     cmds,
 	}
-	obj.ToString = "Microsoft.PowerShell.Commands.PowerShellCmdlet+PowerShell"
 
-	// Property names must match what PSRP expects.
-	// Based on standard PowerShell behavior:
-	obj.Properties["Cmds"] = cmds // "Cmds" is used in PSRP for the list of commands
-	obj.Properties["IsNested"] = p.IsNested
-	obj.Properties["History"] = p.History
+	innerPS := &PSObject{
+		// PowerShell's CreateEmptyPSObject() omits TypeNames for remoting (EncodeAndDecode.cs:401-403)
+		// PowerShell uses Members (MS), not Properties (Props) for remoting objects
+		Members: make(map[string]interface{}),
+	}
+	// MS-PSRP spec section 2.2.2.10 example shows Cmds and IsNested
+	// But PS 7.5 also REQUIRES History and RedirectShellErrorOutputPipe!
+	// pypsrp sends BOTH as Nil (not empty string or boolean)
+	innerPS.Members["Cmds"] = cmdsWrapper
+	innerPS.Members["IsNested"] = p.IsNested
+	innerPS.Members["History"] = nil                        // Nil per pypsrp
+	innerPS.Members["RedirectShellErrorOutputPipe"] = false // PS 7.5 requires Boolean, not Nil
+	// ExtraCmds removed (caused Network Error when nil).
 
-	return obj
+	// 2. Create the Root Wrapper object
+	// pypsrp uses _extended_properties which serialize to MS (Members), not Props
+	// See pypsrp/messages.py:478-486: CreatePipeline uses _extended_properties
+	root := &PSObject{
+		Members: make(map[string]interface{}), // Members (MS), not Properties (Props)!
+	}
+
+	// 3. Add Extended Properties to Root (as Members, per pypsrp)
+	root.Members["NoInput"] = true        // pypsrp uses true (not accepting input)
+	root.Members["AddToHistory"] = false  // PowerShell default (EncodeAndDecode.cs:896)
+	root.Members["IsNested"] = p.IsNested // Only on root wrapper (pypsrp messages.py:485)
+
+	// ApartmentState: MTA (1) - per MS-PSRP official spec section 2.2.2.10 example
+	// Type = System.Threading.ApartmentState (NOT Runspaces!)
+	root.Members["ApartmentState"] = &PSRPEnum{
+		Type:     "System.Threading.ApartmentState", // Per MS-PSRP spec
+		Value:    1,                                 // MTA per spec example
+		ToString: "Unknown",
+	}
+
+	// RemoteStreamOptions: AddInvocationInfo (15) - per MS-PSRP spec
+	// Type = System.Management.Automation.RemoteStreamOptions (NO 'Runspaces'!)
+	root.Members["RemoteStreamOptions"] = &PSRPEnum{
+		Type:     "System.Management.Automation.RemoteStreamOptions", // Per MS-PSRP spec
+		Value:    15,
+		ToString: "AddInvocationInfo",
+	}
+
+	// 4. HostInfo - per pypsrp: when no host, _useRunspaceHost=true and _isHostNull=true
+	hostInfoProps := make(map[string]interface{})
+	hostInfoProps["_isHostNull"] = true // No host implementation
+	hostInfoProps["_isHostUINull"] = true
+	hostInfoProps["_isHostRawUINull"] = true
+	hostInfoProps["_useRunspaceHost"] = true // Use runspace's host
+
+	// MS-PSRP spec CREATE_PIPELINE example shows NO _hostDefaultData in HostInfo
+	// Only the four boolean flags
+
+	// HostInfo also uses Members (MS) per pypsrp Gold Standard - no TypeNames
+	root.Members["HostInfo"] = &PSObject{
+		Members: hostInfoProps, // Members (MS), not Properties (Props)!
+	}
+
+	// 5. Nest the Inner Object
+	root.Members["PowerShell"] = innerPS
+
+	return root
 }
 
 // CommandToPSObject converts a Command object to a PSObject for serialization
@@ -1272,31 +1584,56 @@ func CommandToPSObject(c *objects.Command) *PSObject {
 		params[i] = CommandParameterToPSObject(&p)
 	}
 
+	// Command.ToPSObjectForRemoting() uses CreateEmptyPSObject() - no TypeNames
+	// Commands use Members (MS), not Properties (Props)
 	obj := &PSObject{
-		TypeNames:  []string{"System.Management.Automation.Runspaces.Command", "System.Object"},
-		Properties: make(map[string]interface{}),
+		Members: make(map[string]interface{}),
 	}
-	obj.ToString = c.Name
 
-	obj.Properties["Cmdlet"] = c.Name
-	obj.Properties["IsScript"] = c.IsScript
-	obj.Properties["UseLocalScope"] = c.UseLocalScope
-	obj.Properties["MergeMyResult"] = c.MergeMyResult
-	obj.Properties["Parameters"] = params // Or "Args"? PSRP XML usually shows <Obj N="Parameters">
+	obj.Members["Cmd"] = c.Name
+	// Revert IsScript to boolean false (server requires System.Boolean)
+	obj.Members["IsScript"] = c.IsScript
+	obj.Members["UseLocalScope"] = nil // Nil, not false (per PowerShell reference)
+	// Merge flags - Use PSRPEnum for ALL versions to satisfy strict type requirements
+	noneEnum := &PSRPEnum{
+		Type:     "System.Management.Automation.Runspaces.PipelineResultTypes",
+		Value:    0, // None
+		ToString: "None",
+	}
+
+	// V2 backwards compatibility properties
+	// Spec EXAMPLE (2.2.2.10) uses SINGULAR. Server error "missing MergeMyResult" confirms SINGULAR is required.
+	obj.Members["MergeMyResult"] = noneEnum
+	obj.Members["MergeToResult"] = noneEnum
+	obj.Members["MergePreviousResults"] = noneEnum // Maps to MergeUnclaimedPreviousCommandResults
+
+	// V3+ merge instructions (protocol 2.2+)
+	obj.Members["MergeError"] = noneEnum
+	obj.Members["MergeWarning"] = noneEnum
+	// MergeInformation is NOT in the MS-PSRP spec (2.2.3.12 or example 2.2.2.10)
+	// Removing it to match spec strictly. It caused Network Error when present.
+
+	// Wrap Args in TypedList with correct List<PSObject> TypeNames
+	argsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
+	argsWrapper := &TypedList{
+		TypeNames: []string{argsListTypeName, "System.Object"},
+		Items:     params,
+	}
+	obj.Members["Args"] = argsWrapper
 
 	return obj
 }
 
 // CommandParameterToPSObject converts a CommandParameter to a PSObject for serialization
 func CommandParameterToPSObject(p *objects.CommandParameter) *PSObject {
+	// CommandParameter also uses CreateEmptyPSObject() - no TypeNames
 	obj := &PSObject{
-		TypeNames:  []string{"System.Management.Automation.Runspaces.CommandParameter", "System.Object"},
-		Properties: make(map[string]interface{}),
+		Members: make(map[string]interface{}), // Members (MS), not Properties (Props)!
 	}
-	obj.ToString = p.Name
 
-	obj.Properties["Name"] = p.Name
-	obj.Properties["Value"] = p.Value
+	// Per pypsrp lines 650-652: use "N" and "V" not "Name" and "Value"
+	obj.Members["N"] = p.Name
+	obj.Members["V"] = p.Value
 
 	return obj
 }

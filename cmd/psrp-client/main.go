@@ -12,53 +12,42 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/smnsjas/go-psrpcore/host"
+	"github.com/smnsjas/go-psrpcore/outofproc"
 	"github.com/smnsjas/go-psrpcore/runspace"
 )
 
-// ProcessTransport adapts a child process to io.ReadWriter
-type ProcessTransport struct {
+// ProcessPipes holds the stdin/stdout of a child process.
+type ProcessPipes struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 }
 
-func (p *ProcessTransport) Read(b []byte) (int, error) {
-	n, err := p.stdout.Read(b)
-	if n > 0 {
-		// Trace logs are managed by runspace.go for fragments
-	}
-	return n, err
-}
-
-func (p *ProcessTransport) Write(b []byte) (int, error) {
-	return p.stdin.Write(b)
-}
-
-func (p *ProcessTransport) Close() error {
+func (p *ProcessPipes) Close() error {
 	_ = p.stdin.Close()
 	_ = p.stdout.Close()
 	return p.cmd.Wait()
 }
 
-func startProcessTransport(command string, args ...string) (*ProcessTransport, error) {
+func startProcess(command string, args ...string) (*ProcessPipes, error) {
 	cmd := exec.Command(command, args...)
 	cmd.Stderr = os.Stderr
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get stdin pipe: %w", err)
+		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
+		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start process: %w", err)
+		return nil, fmt.Errorf("start process: %w", err)
 	}
 
-	return &ProcessTransport{
+	return &ProcessPipes{
 		cmd:    cmd,
 		stdin:  stdin,
 		stdout: stdout,
@@ -70,19 +59,31 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	log.Println("Starting pwsh -ServerMode PSRP process...")
-	// ServerMode PSRP allows talking to PowerShell via raw fragments on stdin/stdout
-	transport, err := startProcessTransport("pwsh", "-ServerMode", "PSRP", "-NoLogo", "-NoProfile")
+	log.Println("Starting pwsh -SSHServerMode process...")
+	// SSHServerMode is the correct flag for PowerShell 7+ PSRP over stdio
+	// User clarified pwsh is at /usr/local/bin/pwsh
+	pipes, err := startProcess("/usr/local/bin/pwsh", "-SSHServerMode", "-NoLogo", "-NoProfile")
 	if err != nil {
-		log.Fatalf("Error starting transport: %v", err)
+		log.Fatalf("Failed to start pwsh: %v", err)
 	}
-	defer transport.Close()
+	defer pipes.Close()
+
+	// Create OutOfProcess transport
+	// The transport wraps the stdin/stdout and handles the XML framing protocol
+	transport := outofproc.NewTransport(pipes.stdout, pipes.stdin)
+
+	// Create adapter that provides io.ReadWriter interface for the runspace.
+	// The adapter uses NullGUID for session-level operations (SESSION_CAPABILITY,
+	// INIT_RUNSPACEPOOL, etc.) which is correct per the OutOfProcess protocol.
+	// The runspaceID passed here is used for tracking only.
+	runspaceID := uuid.New()
+	adapter := outofproc.NewAdapter(transport, runspaceID)
 
 	log.Println("Transport started. Initializing RunspacePool...")
-	pool := runspace.New(transport, uuid.New())
+	pool := runspace.New(adapter, runspaceID)
 
 	// Set a minimal host to avoid nil pointer dereferences
-	pool.SetHost(host.NewNullHost())
+	_ = pool.SetHost(host.NewNullHost())
 
 	// Open the pool (connect/handshake)
 	log.Println("Opening RunspacePool...")
@@ -98,6 +99,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("CreatePipeline failed: %v", err)
 	}
+
+	// Add parameter to test CommandParameter logic and ensure Args is not empty
+	// This might help avoid NRE if the server crashes on empty args or specific code path
+	// pl.AddParameter("Format", "yyyy") // Reverting for now - caused Network Error
 
 	// Start consuming output/error in background before invoking
 	go func() {

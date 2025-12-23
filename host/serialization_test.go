@@ -228,7 +228,7 @@ func TestRoundTripComplexCall(t *testing.T) {
 	// Test with a complex PromptForCredential call
 	call := &RemoteHostCall{
 		CallID:   100,
-		MethodID: MethodIDPromptForCredential,
+		MethodID: MethodIDPromptForCredential1,
 		MethodParameters: []interface{}{
 			"Enter Credentials",
 			"Please provide your credentials",

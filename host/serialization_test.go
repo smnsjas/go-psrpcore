@@ -260,3 +260,74 @@ func TestRoundTripComplexCall(t *testing.T) {
 		t.Errorf("expected 4 parameters, got %d", len(decoded.MethodParameters))
 	}
 }
+
+// Phase 4: Additional error path tests
+
+func TestDecodeRemoteHostCall_MissingMethodID(t *testing.T) {
+	// Valid XML with CallID but missing MethodID (mi)
+	data := []byte(`<?xml version="1.0"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><MS><I64 N="ci">1</I64></MS></Obj></Objs>`)
+	_, err := DecodeRemoteHostCall(data)
+	if err == nil {
+		t.Error("expected error for missing MethodID")
+	}
+	if !strings.Contains(err.Error(), "MethodID") {
+		t.Errorf("error should mention MethodID, got: %v", err)
+	}
+}
+
+func TestDecodeRemoteHostCall_InvalidCallIDType(t *testing.T) {
+	// CallID as string instead of integer
+	data := []byte(`<?xml version="1.0"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><MS><S N="ci">invalid</S><I32 N="mi">11</I32></MS></Obj></Objs>`)
+	_, err := DecodeRemoteHostCall(data)
+	if err == nil {
+		t.Error("expected error for invalid CallID type")
+	}
+}
+
+func TestDecodeRemoteHostCall_InvalidMethodIDType(t *testing.T) {
+	// MethodID as string instead of integer
+	data := []byte(`<?xml version="1.0"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><MS><I64 N="ci">1</I64><S N="mi">invalid</S></MS></Obj></Objs>`)
+	_, err := DecodeRemoteHostCall(data)
+	if err == nil {
+		t.Error("expected error for invalid MethodID type")
+	}
+}
+
+func TestDecodeRemoteHostCall_InvalidMethodParametersType(t *testing.T) {
+	// MethodParameters as string instead of list
+	data := []byte(`<?xml version="1.0"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><MS><I64 N="ci">1</I64><I32 N="mi">11</I32><S N="mp">invalid</S></MS></Obj></Objs>`)
+	_, err := DecodeRemoteHostCall(data)
+	if err == nil {
+		t.Error("expected error for invalid MethodParameters type")
+	}
+}
+
+func TestDecodeRemoteHostResponse_InvalidExceptionRaisedType(t *testing.T) {
+	// ExceptionRaised as string instead of bool
+	data := []byte(`<?xml version="1.0"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><MS><I64 N="ci">1</I64><S N="er">not_bool</S></MS></Obj></Objs>`)
+	_, err := DecodeRemoteHostResponse(data)
+	if err == nil {
+		t.Error("expected error for invalid ExceptionRaised type")
+	}
+}
+
+func TestDecodeRemoteHostResponse_InvalidCallIDType(t *testing.T) {
+	// CallID as string instead of integer
+	data := []byte(`<?xml version="1.0"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><MS><S N="ci">invalid</S><B N="er">false</B></MS></Obj></Objs>`)
+	_, err := DecodeRemoteHostResponse(data)
+	if err == nil {
+		t.Error("expected error for invalid CallID type")
+	}
+}
+
+func TestDecodeRemoteHostResponse_MissingExceptionRaised(t *testing.T) {
+	// Missing ExceptionRaised (er) should default to false without error
+	data := []byte(`<?xml version="1.0"?><Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj RefId="0"><MS><I64 N="ci">1</I64></MS></Obj></Objs>`)
+	resp, err := DecodeRemoteHostResponse(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ExceptionRaised {
+		t.Error("ExceptionRaised should default to false")
+	}
+}

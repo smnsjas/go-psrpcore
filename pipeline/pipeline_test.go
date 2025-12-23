@@ -572,3 +572,162 @@ func TestPipeline_ErrorChannelTimeout(t *testing.T) {
 		t.Errorf("timeout took %v, expected ~100ms", elapsed)
 	}
 }
+
+// TestPipeline_Builder tests the builder pattern methods.
+func TestPipeline_Builder(t *testing.T) {
+	transport := &mockTransport{}
+	runspaceID := uuid.New()
+
+	// given: a pipeline created with NewBuilder
+	p := NewBuilder(transport, runspaceID)
+
+	// then: pipeline should start in NotStarted state with valid ID
+	if p.State() != StateNotStarted {
+		t.Errorf("expected initial state NotStarted, got %v", p.State())
+	}
+	if p.ID() == uuid.Nil {
+		t.Error("pipeline ID should not be nil")
+	}
+
+	// when: adding commands and parameters using fluent API
+	result := p.AddCommand("Get-Process", false).
+		AddParameter("Name", "powershell").
+		AddCommand("Select-Object", false).
+		AddParameter("Property", "Id").
+		AddArgument("extraArg")
+
+	// then: builder should return same pipeline for chaining
+	if result != p {
+		t.Error("builder methods should return the same pipeline for chaining")
+	}
+}
+
+// TestPipeline_Error tests the Error() channel accessor.
+func TestPipeline_Error(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "Get-Process")
+
+	// given: a pipeline
+	// when: accessing the Error channel
+	errCh := p.Error()
+
+	// then: should return a valid channel
+	if errCh == nil {
+		t.Fatal("Error() returned nil channel")
+	}
+
+	// Verify it's the same channel on multiple calls
+	if p.Error() != errCh {
+		t.Error("Error() should return the same channel on multiple calls")
+	}
+}
+
+// TestPipeline_Fail tests the Fail() method for external failure signaling.
+func TestPipeline_Fail(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "Get-Process")
+
+	// given: a running pipeline
+	ctx := context.Background()
+	if err := p.Invoke(ctx); err != nil {
+		t.Fatalf("Invoke failed: %v", err)
+	}
+	if p.State() != StateRunning {
+		t.Errorf("expected Running state, got %v", p.State())
+	}
+
+	// when: calling Fail() with an error
+	testErr := errors.New("transport connection lost")
+	p.Fail(testErr)
+
+	// then: pipeline should transition to Failed state
+	if p.State() != StateFailed {
+		t.Errorf("expected Failed state after Fail(), got %v", p.State())
+	}
+
+	// then: Wait() should return the error
+	err := p.Wait()
+	if err == nil {
+		t.Error("Wait() should return an error after Fail()")
+	}
+	if err.Error() != testErr.Error() {
+		t.Errorf("Wait() error mismatch: got %v, want %v", err, testErr)
+	}
+}
+
+// TestPipeline_Stop_InvalidState tests stopping a pipeline in an invalid state.
+func TestPipeline_Stop_InvalidState(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "Get-Process")
+
+	// given: a pipeline that has NOT been invoked (still NotStarted)
+	// when: trying to stop it
+	err := p.Stop(context.Background())
+
+	// then: should return ErrInvalidState
+	if err == nil {
+		t.Error("expected error when stopping non-running pipeline")
+	}
+	if !errors.Is(err, ErrInvalidState) {
+		t.Errorf("expected ErrInvalidState, got: %v", err)
+	}
+}
+
+// TestPipeline_SendInput_InvalidState tests sending input to a non-running pipeline.
+func TestPipeline_SendInput_InvalidState(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "Get-Process")
+
+	// given: a pipeline that has NOT been invoked
+	// when: trying to send input
+	err := p.SendInput(context.Background(), "test input")
+
+	// then: should return ErrInvalidState
+	if err == nil {
+		t.Error("expected error when sending input to non-running pipeline")
+	}
+	if !errors.Is(err, ErrInvalidState) {
+		t.Errorf("expected ErrInvalidState, got: %v", err)
+	}
+}
+
+// TestPipeline_CloseInput_InvalidState tests closing input on a non-running pipeline.
+func TestPipeline_CloseInput_InvalidState(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "Get-Process")
+
+	// given: a pipeline that has NOT been invoked
+	// when: trying to close input
+	err := p.CloseInput(context.Background())
+
+	// then: should return ErrInvalidState
+	if err == nil {
+		t.Error("expected error when closing input on non-running pipeline")
+	}
+	if !errors.Is(err, ErrInvalidState) {
+		t.Errorf("expected ErrInvalidState, got: %v", err)
+	}
+}
+
+// TestPipeline_Invoke_AlreadyRunning tests invoking an already-running pipeline.
+func TestPipeline_Invoke_AlreadyRunning(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "Get-Process")
+
+	// given: a pipeline that has been invoked
+	ctx := context.Background()
+	if err := p.Invoke(ctx); err != nil {
+		t.Fatalf("first Invoke failed: %v", err)
+	}
+
+	// when: trying to invoke again
+	err := p.Invoke(ctx)
+
+	// then: should return ErrInvalidState
+	if err == nil {
+		t.Error("expected error when invoking already-running pipeline")
+	}
+	if !errors.Is(err, ErrInvalidState) {
+		t.Errorf("expected ErrInvalidState, got: %v", err)
+	}
+}

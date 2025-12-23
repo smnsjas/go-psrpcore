@@ -32,22 +32,22 @@ const (
 
 // PSHostUserInterface methods (11-26)
 const (
-	MethodIDReadLine                      MethodID = 11 // Read a line of user input
-	MethodIDReadLineAsSecureString        MethodID = 12 // Read sensitive input
-	MethodIDWrite1                        MethodID = 13 // Write(string value)
-	MethodIDWrite2                        MethodID = 14 // Write(ConsoleColor foreground, ConsoleColor background, string value)
-	MethodIDWriteLine1                    MethodID = 15 // WriteLine()
-	MethodIDWriteLine2                    MethodID = 16 // WriteLine(string value)
-	MethodIDWriteLine3                    MethodID = 17 // WriteLine(ConsoleColor foreground, ConsoleColor background, string value)
-	MethodIDWriteErrorLine                MethodID = 18 // Write an error message
-	MethodIDWriteDebugLine                MethodID = 19 // Write debug output
-	MethodIDWriteProgress                 MethodID = 20 // Write progress record
-	MethodIDWriteVerboseLine              MethodID = 21 // Write verbose output
-	MethodIDWriteWarningLine              MethodID = 22 // Write warning output
-	MethodIDPrompt                        MethodID = 23 // Prompt user with fields
-	MethodIDPromptForCredential1          MethodID = 24 // PromptForCredential(caption, message, userName, targetName)
-	MethodIDPromptForCredential2          MethodID = 25 // PromptForCredential(caption, message, userName, targetName, allowedCredentialTypes, options)
-	MethodIDPromptForChoice               MethodID = 26 // Prompt user to choose from options
+	MethodIDReadLine               MethodID = 11 // Read a line of user input
+	MethodIDReadLineAsSecureString MethodID = 12 // Read sensitive input
+	MethodIDWrite1                 MethodID = 13 // Write(string value)
+	MethodIDWrite2                 MethodID = 14 // Write(ConsoleColor foreground, ConsoleColor background, string value)
+	MethodIDWriteLine1             MethodID = 15 // WriteLine()
+	MethodIDWriteLine2             MethodID = 16 // WriteLine(string value)
+	MethodIDWriteLine3             MethodID = 17 // WriteLine(ConsoleColor foreground, ConsoleColor background, string value)
+	MethodIDWriteErrorLine         MethodID = 18 // Write an error message
+	MethodIDWriteDebugLine         MethodID = 19 // Write debug output
+	MethodIDWriteProgress          MethodID = 20 // Write progress record
+	MethodIDWriteVerboseLine       MethodID = 21 // Write verbose output
+	MethodIDWriteWarningLine       MethodID = 22 // Write warning output
+	MethodIDPrompt                 MethodID = 23 // Prompt user with fields
+	MethodIDPromptForCredential1   MethodID = 24 // PromptForCredential(caption, message, userName, targetName)
+	MethodIDPromptForCredential2   MethodID = 25 // PromptForCredential(caption, message, userName, targetName, allowedCredentialTypes, options)
+	MethodIDPromptForChoice        MethodID = 26 // Prompt user to choose from options
 )
 
 // PSHostRawUserInterface methods (27-51)
@@ -235,9 +235,9 @@ type RemoteHostCall struct {
 // RemoteHostResponse represents a host callback response to the server.
 // Corresponds to Microsoft.PowerShell.Remoting.Internal.RemoteHostResponse
 type RemoteHostResponse struct {
-	CallID           int64       // ci - Must match CallID from request
-	ExceptionRaised  bool        // er - True if an exception occurred
-	ReturnValue      interface{} // rv - Return value from host method, or exception if er=true
+	CallID          int64       // ci - Must match CallID from request
+	ExceptionRaised bool        // er - True if an exception occurred
+	ReturnValue     interface{} // rv - Return value from host method, or exception if er=true
 }
 
 // CallbackHandler manages host callback execution.
@@ -752,13 +752,19 @@ func (h *CallbackHandler) handleWriteProgress(call *RemoteHostCall) error {
 		return fmt.Errorf("WriteProgress sourceId must be int, got %T", call.MethodParameters[0])
 	}
 
-	// For now, accept any type for the progress record parameter
-	// A more complete implementation would deserialize the ProgressRecord
-	// from the PSObject parameter
+	// Convert PSObject parameter to ProgressRecord
+	record, err := convertToProgressRecord(call.MethodParameters[1])
+	if err != nil {
+		// Progress is informational - don't fail the callback on conversion errors.
+		// Pass nil to maintain backwards compatibility with hosts that may not handle it.
+		if h.host != nil && h.host.UI() != nil {
+			h.host.UI().WriteProgress(sourceId, nil)
+		}
+		return nil
+	}
+
 	if h.host != nil && h.host.UI() != nil {
-		// Call with nil record for now - implementing full ProgressRecord deserialization
-		// is complex and can be done later if needed
-		h.host.UI().WriteProgress(sourceId, nil)
+		h.host.UI().WriteProgress(sourceId, record)
 	}
 	return nil
 }
@@ -863,7 +869,9 @@ func (h *CallbackHandler) handlePromptForCredential1(call *RemoteHostCall) (inte
 
 // handlePromptForCredential2 processes PromptForCredential2 method calls.
 // Parameters: [0] string (caption), [1] string (message), [2] string (userName), [3] string (targetName),
-//             [4] CredentialTypes (allowedCredentialTypes), [5] CredentialUIOptions (options)
+//
+//	[4] CredentialTypes (allowedCredentialTypes), [5] CredentialUIOptions (options)
+//
 // Returns: *objects.PSCredential
 func (h *CallbackHandler) handlePromptForCredential2(call *RemoteHostCall) (interface{}, error) {
 	if len(call.MethodParameters) < 6 {

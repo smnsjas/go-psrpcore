@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/smnsjas/go-psrpcore/objects"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 // mockHost implements Host for testing
@@ -21,12 +22,12 @@ func newMockHost() *mockHost {
 	}
 }
 
-func (h *mockHost) GetName() string                  { return "MockHost" }
-func (h *mockHost) GetVersion() Version              { return Version{Major: 1, Minor: 0} }
-func (h *mockHost) GetInstanceId() string            { return "mock-id" }
-func (h *mockHost) GetCurrentCulture() string        { return "en-US" }
-func (h *mockHost) GetCurrentUICulture() string      { return "en-US" }
-func (h *mockHost) UI() HostUI                       { return h.ui }
+func (h *mockHost) GetName() string             { return "MockHost" }
+func (h *mockHost) GetVersion() Version         { return Version{Major: 1, Minor: 0} }
+func (h *mockHost) GetInstanceId() string       { return "mock-id" }
+func (h *mockHost) GetCurrentCulture() string   { return "en-US" }
+func (h *mockHost) GetCurrentUICulture() string { return "en-US" }
+func (h *mockHost) UI() HostUI                  { return h.ui }
 
 // mockHostUI implements HostUI for testing
 type mockHostUI struct {
@@ -42,6 +43,9 @@ type mockHostUI struct {
 	credentialError     error
 	choiceResult        int
 	choiceError         error
+	// Progress tracking
+	lastProgressSourceId int64
+	lastProgressRecord   *objects.ProgressRecord
 }
 
 func (ui *mockHostUI) ReadLine() (string, error) {
@@ -82,7 +86,10 @@ func (ui *mockHostUI) WriteWarningLine(text string) {
 	ui.lastWritten = text
 }
 
-func (ui *mockHostUI) WriteProgress(sourceId int64, record *objects.ProgressRecord) {}
+func (ui *mockHostUI) WriteProgress(sourceId int64, record *objects.ProgressRecord) {
+	ui.lastProgressSourceId = sourceId
+	ui.lastProgressRecord = record
+}
 
 func (ui *mockHostUI) Prompt(caption, message string, descriptions []FieldDescription) (map[string]interface{}, error) {
 	return ui.promptResult, ui.promptError
@@ -438,16 +445,93 @@ func TestCallbackHandler_HandleWriteProgress(t *testing.T) {
 	host := newMockHost()
 	handler := NewCallbackHandler(host)
 
+	// Create realistic PSObject parameter with all fields
+	progressObj := &serialization.PSObject{
+		TypeNames: []string{"System.Management.Automation.ProgressRecord"},
+		Properties: map[string]interface{}{
+			"ActivityId":        int32(5),
+			"ParentActivityId":  int32(2),
+			"Activity":          "Test Progress",
+			"StatusDescription": "Processing items",
+			"CurrentOperation":  "Item 5 of 10",
+			"PercentComplete":   int32(50),
+			"SecondsRemaining":  int32(30),
+			"RecordType":        int32(0), // Processing
+		},
+	}
+
 	call := &RemoteHostCall{
 		CallID:           15,
 		MethodID:         MethodIDWriteProgress,
-		MethodParameters: []interface{}{int64(123), nil},
+		MethodParameters: []interface{}{int64(123), progressObj},
 	}
 
 	response := handler.HandleCall(call)
 
 	if response.ExceptionRaised {
 		t.Errorf("expected no exception, got: %v", response.ReturnValue)
+	}
+
+	// Verify sourceId was captured
+	if host.ui.lastProgressSourceId != 123 {
+		t.Errorf("expected sourceId=123, got %d", host.ui.lastProgressSourceId)
+	}
+
+	// Verify ProgressRecord was deserialized and passed (not nil)
+	if host.ui.lastProgressRecord == nil {
+		t.Fatal("expected non-nil ProgressRecord to be passed to UI")
+	}
+
+	record := host.ui.lastProgressRecord
+
+	// Verify all fields were correctly deserialized
+	if record.ActivityId != 5 {
+		t.Errorf("expected ActivityId=5, got %d", record.ActivityId)
+	}
+	if record.ParentActivityId != 2 {
+		t.Errorf("expected ParentActivityId=2, got %d", record.ParentActivityId)
+	}
+	if record.Activity != "Test Progress" {
+		t.Errorf("expected Activity='Test Progress', got %q", record.Activity)
+	}
+	if record.StatusDescription != "Processing items" {
+		t.Errorf("expected StatusDescription='Processing items', got %q", record.StatusDescription)
+	}
+	if record.CurrentOperation != "Item 5 of 10" {
+		t.Errorf("expected CurrentOperation='Item 5 of 10', got %q", record.CurrentOperation)
+	}
+	if record.PercentComplete != 50 {
+		t.Errorf("expected PercentComplete=50, got %d", record.PercentComplete)
+	}
+	if record.SecondsRemaining != 30 {
+		t.Errorf("expected SecondsRemaining=30, got %d", record.SecondsRemaining)
+	}
+	if record.RecordType != objects.ProgressRecordTypeProcessing {
+		t.Errorf("expected RecordType=Processing, got %d", record.RecordType)
+	}
+}
+
+func TestCallbackHandler_HandleWriteProgress_InvalidRecord(t *testing.T) {
+	host := newMockHost()
+	handler := NewCallbackHandler(host)
+
+	// Pass invalid type for ProgressRecord parameter
+	call := &RemoteHostCall{
+		CallID:           16,
+		MethodID:         MethodIDWriteProgress,
+		MethodParameters: []interface{}{int64(456), "invalid"},
+	}
+
+	response := handler.HandleCall(call)
+
+	// Should not raise exception (graceful degradation)
+	if response.ExceptionRaised {
+		t.Errorf("expected no exception for invalid progress record, got: %v", response.ReturnValue)
+	}
+
+	// Should pass nil when conversion fails
+	if host.ui.lastProgressRecord != nil {
+		t.Errorf("expected nil ProgressRecord on conversion error, got %+v", host.ui.lastProgressRecord)
 	}
 }
 

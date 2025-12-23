@@ -709,17 +709,12 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 					p.handleTransportError(fmt.Errorf("host call failed: %w", err))
 				}
 			}()
-			// Handle metadata replies
-		case messages.MessageTypeGetCommandMetadataReply:
-			select {
-			case p.metadataCh <- msg:
-			default:
-				// Dropping metadata reply if channel is full or no one is listening
-				// In a real implementation we might want to log this
-			}
 
 		case messages.MessageTypeRunspacePoolState:
 			// Handle state changes if any (e.g. Broken/Closed from server)
+			// Note: GET_COMMAND_METADATA responses come via PIPELINE_OUTPUT messages,
+			// not a separate message type. The GetCommandMetadata implementation
+			// should create a pipeline to receive responses per MS-PSRP section 3.1.4.5.
 		}
 	}
 }

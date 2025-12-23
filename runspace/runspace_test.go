@@ -1047,8 +1047,13 @@ func TestGetCommandMetadata(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 
+		// Note: Per MS-PSRP spec (section 3.1.4.5), GET_COMMAND_METADATA responses
+		// come via PIPELINE_OUTPUT messages containing CommandMetadata objects.
+		// This test simulates the channel-based response mechanism used by the
+		// current implementation. A full implementation would use a pipeline
+		// to receive PIPELINE_OUTPUT messages.
 		replyMsg := &messages.Message{
-			Type: messages.MessageTypeGetCommandMetadataReply,
+			Type: messages.MessageTypePipelineOutput,
 			Data: replyData,
 		}
 		pool.metadataCh <- replyMsg

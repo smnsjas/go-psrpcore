@@ -433,6 +433,12 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 	case *objects.ErrorRecord:
 		return s.serializePSObject(ErrorRecordToPSObject(val), name)
 
+	case objects.ProgressRecord:
+		return s.serializePSObject(ProgressRecordToPSObject(&val), name)
+
+	case *objects.ProgressRecord:
+		return s.serializePSObject(ProgressRecordToPSObject(val), name)
+
 	case *objects.SecureString:
 		s.buf.WriteString("<SS")
 		s.buf.WriteString(nameAttr)
@@ -682,6 +688,28 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 		TypeNames:  []string{"System.Management.Automation.ErrorRecord", "System.Object"},
 		Properties: props,
 		ToString:   err.Exception.Message,
+	}
+}
+
+// ProgressRecordToPSObject converts a ProgressRecord to a PSObject for serialization.
+func ProgressRecordToPSObject(record *objects.ProgressRecord) *PSObject {
+	props := make(map[string]interface{})
+
+	props["ActivityId"] = int32(record.ActivityId)
+	props["ParentActivityId"] = int32(record.ParentActivityId)
+	props["Activity"] = record.Activity
+	props["StatusDescription"] = record.StatusDescription
+	props["CurrentOperation"] = record.CurrentOperation
+	props["PercentComplete"] = int32(record.PercentComplete)
+	props["SecondsRemaining"] = int32(record.SecondsRemaining)
+	props["RecordType"] = int32(record.RecordType)
+
+	return &PSObject{
+		TypeNames: []string{
+			"System.Management.Automation.ProgressRecord",
+			"System.Object",
+		},
+		Properties: props,
 	}
 }
 

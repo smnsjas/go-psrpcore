@@ -134,8 +134,6 @@ const (
 const (
 	// Create pipeline - MS-PSRP 2.2.3.2
 	MessageTypeCreatePipeline MessageType = 0x00021006
-	// Get command metadata reply - MS-PSRP 2.2.3.1
-	MessageTypeGetCommandMetadataReply MessageType = 0x0002100A
 	// Signal pipeline (stop/interrupt) - MS-PSRP 2.2.3.13
 	MessageTypeSignal MessageType = 0x00041001
 	// Pipeline input data - MS-PSRP 2.2.3.3

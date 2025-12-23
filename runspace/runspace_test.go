@@ -289,7 +289,7 @@ func TestOpenSuccess(t *testing.T) {
 
 	// Open pool
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	if err := pool.Open(ctx); err != nil {
 		t.Fatalf("Open failed: %v", err)
@@ -329,7 +329,7 @@ func TestOpenAlreadyOpen(t *testing.T) {
 	pool.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	err := pool.Open(ctx)
 	if err != ErrAlreadyOpen {
@@ -377,7 +377,7 @@ func TestCloseSuccess(t *testing.T) {
 	pool.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	if err := pool.Close(ctx); err != nil {
 		t.Fatalf("Close failed: %v", err)
@@ -398,7 +398,7 @@ func TestCloseIdempotent(t *testing.T) {
 	pool.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	// First close
 	if err := pool.Close(ctx); err != nil {
@@ -682,7 +682,7 @@ func TestHostCallbackDuringOpen(t *testing.T) {
 
 	// Open pool (should handle host callback automatically)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	if err := pool.Open(ctx); err != nil {
 		t.Fatalf("Open failed: %v", err)

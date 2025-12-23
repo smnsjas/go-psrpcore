@@ -129,21 +129,16 @@ type Serializer struct {
 	buf        bytes.Buffer
 	enc        *xml.Encoder
 	refCounter int
-	objRefs    []*objRef      // Track object references to avoid cycles (slice because maps aren't hashable)
-	tnRefs     map[string]int // Track type name references
+	objRefs    map[*PSObject]int // Track PSObject pointer references to avoid cycles (O(1) lookup)
+	tnRefs     map[string]int    // Track type name references
 	encryptor  EncryptionProvider
-}
-
-type objRef struct {
-	obj   interface{}
-	refID int
 }
 
 // pool for serializers
 var serializerPool = sync.Pool{
 	New: func() interface{} {
 		s := &Serializer{
-			objRefs: make([]*objRef, 0, 64),
+			objRefs: make(map[*PSObject]int, 64),
 			tnRefs:  make(map[string]int),
 		}
 		s.enc = xml.NewEncoder(&s.buf)
@@ -160,6 +155,13 @@ var deserializerPool = sync.Pool{
 			objRefs: make(map[int]interface{}),
 			tnRefs:  make(map[int][]string),
 		}
+	},
+}
+
+// pool for property key slices to reduce allocations during sorting
+var keySlicePool = sync.Pool{
+	New: func() interface{} {
+		return make([]string, 0, 16)
 	},
 }
 
@@ -192,9 +194,11 @@ func (s *Serializer) Close() {
 func (s *Serializer) Reset() {
 	s.buf.Reset()
 	s.refCounter = 0
-	// Keep capacity
-	s.objRefs = s.objRefs[:0]
-	// Clear map
+	// Clear objRefs map
+	for k := range s.objRefs {
+		delete(s.objRefs, k)
+	}
+	// Clear tnRefs map
 	for k := range s.tnRefs {
 		delete(s.tnRefs, k)
 	}
@@ -203,23 +207,21 @@ func (s *Serializer) Reset() {
 
 // findObjRef searches for an existing object reference
 func (s *Serializer) findObjRef(v interface{}) (int, bool) {
-	for _, ref := range s.objRefs {
-		// Use pointer equality for PSObject pointers
-		if pObj1, ok1 := v.(*PSObject); ok1 {
-			if pObj2, ok2 := ref.obj.(*PSObject); ok2 {
-				if pObj1 == pObj2 {
-					return ref.refID, true
-				}
-			}
+	// Only track PSObject pointers for reference detection
+	if pObj, ok := v.(*PSObject); ok {
+		if refID, exists := s.objRefs[pObj]; exists {
+			return refID, true
 		}
-		// For other types, just skip (maps can't be compared)
 	}
 	return 0, false
 }
 
 // addObjRef adds a new object reference
 func (s *Serializer) addObjRef(v interface{}, refID int) {
-	s.objRefs = append(s.objRefs, &objRef{obj: v, refID: refID})
+	// Only track PSObject pointers
+	if pObj, ok := v.(*PSObject); ok {
+		s.objRefs[pObj] = refID
+	}
 }
 
 // Serialize converts a Go value to CLIXML bytes.
@@ -290,138 +292,41 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 	switch v.(type) {
 	case *PSObject:
 		if refID, exists := s.findObjRef(v); exists {
-			// Object already serialized, emit reference
-			if name != "" {
-				s.buf.WriteString(`<Ref N="`)
-				s.buf.WriteString(name)
-				s.buf.WriteString(`" RefId="`)
-				s.buf.WriteString(strconv.Itoa(refID))
-				s.buf.WriteString(`"/>`)
-			} else {
-				s.buf.WriteString(`<Ref RefId="`)
-				s.buf.WriteString(strconv.Itoa(refID))
-				s.buf.WriteString(`"/>`)
-			}
+			s.writeObjRef(refID, name)
 			return nil
 		}
 	}
 
-	nameAttr := ""
-	if name != "" {
-		// Use manual string concatenation or builder if heavily used, but Sprintf is okay for short strings
-		// Optimization: avoid Sprintf for common case
-		nameAttr = ` N="` + name + `"`
-	}
-
 	switch val := v.(type) {
 	case *PSRPEnum:
-		// <Obj N="..." RefId="..."><TN RefId="..."><T>Type</T>...</TN><ToString>Str</ToString><I32>Val</I32></Obj>
-		// NOTE: Must use same increment pattern as serializePSObject (get, then increment)
-		refID := s.refCounter
-		s.refCounter++
-
-		s.buf.WriteString("<Obj")
-		s.buf.WriteString(nameAttr) // Handles N="..."
-		s.buf.WriteString(" RefId=\"")
-		s.buf.WriteString(strconv.Itoa(refID))
-		s.buf.WriteString("\">")
-
-		// Create TypeNames key for PSRPEnum
-		tnKey := val.Type + "|System.Enum|System.ValueType|System.Object"
-
-		if tnRefID, exists := s.tnRefs[tnKey]; exists {
-			s.buf.WriteString(`<TNRef RefId="`)
-			s.buf.WriteString(strconv.Itoa(tnRefID))
-			s.buf.WriteString(`"/>`)
-		} else {
-			tnRefID := len(s.tnRefs)
-			s.tnRefs[tnKey] = tnRefID
-
-			s.buf.WriteString("<TN RefId=\"")
-			s.buf.WriteString(strconv.Itoa(tnRefID))
-			s.buf.WriteString("\"><T>")
-			s.buf.WriteString(val.Type)
-			s.buf.WriteString("</T><T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>")
-		}
-
-		s.buf.WriteString("<ToString>")
-		s.buf.WriteString(val.ToString)
-		s.buf.WriteString("</ToString>")
-
-		s.buf.WriteString("<I32>")
-		s.buf.WriteString(strconv.Itoa(int(val.Value)))
-		s.buf.WriteString("</I32>")
-
-		s.buf.WriteString("</Obj>")
+		return s.serializePSRPEnumFast(val, name)
 
 	case string:
-		s.buf.WriteString("<S")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
-			return fmt.Errorf("escape string: %w", err)
-		}
-		s.buf.WriteString("</S>")
+		return s.serializeStringFast(val, name)
 
 	case int:
-		s.buf.WriteString("<I32")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(strconv.FormatInt(int64(val), 10))
-		s.buf.WriteString("</I32>")
+		return s.serializeInt32Fast(int32(val), name)
 
 	case int32:
-		s.buf.WriteString("<I32")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(strconv.FormatInt(int64(val), 10))
-		s.buf.WriteString("</I32>")
+		return s.serializeInt32Fast(val, name)
 
 	case int64:
-		s.buf.WriteString("<I64")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(strconv.FormatInt(val, 10))
-		s.buf.WriteString("</I64>")
+		return s.serializeInt64Fast(val, name)
 
 	case bool:
-		s.buf.WriteString("<B")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		if val {
-			s.buf.WriteString("true")
-		} else {
-			s.buf.WriteString("false")
-		}
-		s.buf.WriteString("</B>")
+		return s.serializeBoolFast(val, name)
 
 	case float64:
-		s.buf.WriteString("<Db")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(strconv.FormatFloat(val, 'f', -1, 64))
-		s.buf.WriteString("</Db>")
+		return s.serializeFloat64Fast(val, name)
 
 	case []byte:
-		s.buf.WriteString("<BA")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(base64.StdEncoding.EncodeToString(val))
-		s.buf.WriteString("</BA>")
+		return s.serializeByteArrayFast(val, name)
 
 	case time.Time:
-		s.buf.WriteString("<DT")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(val.Format(time.RFC3339Nano))
-		s.buf.WriteString("</DT>")
+		return s.serializeTimeFast(val, name)
 
 	case uuid.UUID:
-		s.buf.WriteString("<G")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(val.String())
-		s.buf.WriteString("</G>")
+		return s.serializeUUIDFast(val, name)
 
 	case []interface{}:
 		return s.serializeArray(reflect.ValueOf(val), name)
@@ -451,30 +356,10 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		return s.serializePSObject(ProgressRecordToPSObject(val), name)
 
 	case *objects.SecureString:
-		s.buf.WriteString("<SS")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		var data []byte
-		if s.encryptor != nil {
-			// Encrypt with provider (Session Key)
-			var err error
-			data, err = s.encryptor.Encrypt(val.EncryptedBytes())
-			if err != nil {
-				return fmt.Errorf("encrypt secure string: %w", err)
-			}
-		} else {
-			// No provider, use internal encrypted bytes (local protection)
-			data = val.EncryptedBytes()
-		}
-		s.buf.WriteString(base64.StdEncoding.EncodeToString(data))
-		s.buf.WriteString("</SS>")
+		return s.serializeSecureStringFast(val, name)
 
 	case *objects.ScriptBlock:
-		s.buf.WriteString(fmt.Sprintf("<SB%s>", nameAttr))
-		if err := xml.EscapeText(&s.buf, []byte(val.Text)); err != nil {
-			return fmt.Errorf("escape script block: %w", err)
-		}
-		s.buf.WriteString("</SB>")
+		return s.serializeScriptBlockFast(val, name)
 
 	case *objects.PowerShell:
 		return s.serializePSObject(PowerShellToPSObject(val), name)
@@ -486,18 +371,10 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		return s.serializePSObject(CommandParameterToPSObject(val), name)
 
 	case objects.Version:
-		s.buf.WriteString("<Version")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(val.String())
-		s.buf.WriteString("</Version>")
+		return s.serializeVersionFast(val, name)
 
 	case *objects.Version:
-		s.buf.WriteString("<Version")
-		s.buf.WriteString(nameAttr)
-		s.buf.WriteString(">")
-		s.buf.WriteString(val.String())
-		s.buf.WriteString("</Version>")
+		return s.serializeVersionFast(*val, name)
 
 	case *TypedList:
 		return s.serializeTypedList(val, name)
@@ -512,7 +389,227 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 
 		return fmt.Errorf("%w: %T", ErrUnsupportedType, v)
 	}
+}
 
+// Helper methods for Fast Paths
+
+func (s *Serializer) writeObjRef(refID int, name string) {
+	if name != "" {
+		s.buf.WriteString(`<Ref N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`" RefId="`)
+		s.buf.WriteString(strconv.Itoa(refID))
+		s.buf.WriteString(`"/>`)
+	} else {
+		s.buf.WriteString(`<Ref RefId="`)
+		s.buf.WriteString(strconv.Itoa(refID))
+		s.buf.WriteString(`"/>`)
+	}
+}
+
+func (s *Serializer) serializeStringFast(val string, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<S N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<S>")
+	}
+	if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
+		return fmt.Errorf("escape string: %w", err)
+	}
+	s.buf.WriteString("</S>")
+	return nil
+}
+
+func (s *Serializer) serializeInt32Fast(val int32, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<I32 N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<I32>")
+	}
+	s.buf.WriteString(strconv.FormatInt(int64(val), 10))
+	s.buf.WriteString("</I32>")
+	return nil
+}
+
+func (s *Serializer) serializeInt64Fast(val int64, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<I64 N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<I64>")
+	}
+	s.buf.WriteString(strconv.FormatInt(val, 10))
+	s.buf.WriteString("</I64>")
+	return nil
+}
+
+func (s *Serializer) serializeBoolFast(val bool, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<B N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<B>")
+	}
+	if val {
+		s.buf.WriteString("true")
+	} else {
+		s.buf.WriteString("false")
+	}
+	s.buf.WriteString("</B>")
+	return nil
+}
+
+func (s *Serializer) serializeFloat64Fast(val float64, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<Db N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<Db>")
+	}
+	s.buf.WriteString(strconv.FormatFloat(val, 'f', -1, 64))
+	s.buf.WriteString("</Db>")
+	return nil
+}
+
+func (s *Serializer) serializeByteArrayFast(val []byte, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<BA N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<BA>")
+	}
+	s.buf.WriteString(base64.StdEncoding.EncodeToString(val))
+	s.buf.WriteString("</BA>")
+	return nil
+}
+
+func (s *Serializer) serializeTimeFast(val time.Time, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<DT N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<DT>")
+	}
+	s.buf.WriteString(val.Format(time.RFC3339Nano))
+	s.buf.WriteString("</DT>")
+	return nil
+}
+
+func (s *Serializer) serializeUUIDFast(val uuid.UUID, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<G N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<G>")
+	}
+	s.buf.WriteString(val.String())
+	s.buf.WriteString("</G>")
+	return nil
+}
+
+func (s *Serializer) serializeVersionFast(val objects.Version, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<Version N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<Version>")
+	}
+	s.buf.WriteString(val.String())
+	s.buf.WriteString("</Version>")
+	return nil
+}
+
+func (s *Serializer) serializeSecureStringFast(val *objects.SecureString, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<SS N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<SS>")
+	}
+	var data []byte
+	if s.encryptor != nil {
+		var err error
+		data, err = s.encryptor.Encrypt(val.EncryptedBytes())
+		if err != nil {
+			return fmt.Errorf("encrypt secure string: %w", err)
+		}
+	} else {
+		data = val.EncryptedBytes()
+	}
+	s.buf.WriteString(base64.StdEncoding.EncodeToString(data))
+	s.buf.WriteString("</SS>")
+	return nil
+}
+
+func (s *Serializer) serializeScriptBlockFast(val *objects.ScriptBlock, name string) error {
+	if name != "" {
+		s.buf.WriteString(`<SB N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString("<SB>")
+	}
+	if err := xml.EscapeText(&s.buf, []byte(val.Text)); err != nil {
+		return fmt.Errorf("escape script block: %w", err)
+	}
+	s.buf.WriteString("</SB>")
+	return nil
+}
+
+func (s *Serializer) serializePSRPEnumFast(val *PSRPEnum, name string) error {
+	refID := s.refCounter
+	s.refCounter++
+
+	if name != "" {
+		s.buf.WriteString(`<Obj N="`)
+		s.buf.WriteString(name)
+		s.buf.WriteString(`" RefId="`)
+		s.buf.WriteString(strconv.Itoa(refID))
+		s.buf.WriteString(`">`)
+	} else {
+		s.buf.WriteString(`<Obj RefId="`)
+		s.buf.WriteString(strconv.Itoa(refID))
+		s.buf.WriteString(`">`)
+	}
+
+	tnKey := val.Type + "|System.Enum|System.ValueType|System.Object"
+
+	if tnRefID, exists := s.tnRefs[tnKey]; exists {
+		s.buf.WriteString(`<TNRef RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`"/>`)
+	} else {
+		tnRefID := len(s.tnRefs)
+		s.tnRefs[tnKey] = tnRefID
+
+		s.buf.WriteString(`<TN RefId="`)
+		s.buf.WriteString(strconv.Itoa(tnRefID))
+		s.buf.WriteString(`"><T>`)
+		s.buf.WriteString(val.Type)
+		s.buf.WriteString("</T><T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>")
+	}
+
+	s.buf.WriteString("<ToString>")
+	s.buf.WriteString(val.ToString)
+	s.buf.WriteString("</ToString>")
+
+	s.buf.WriteString("<I32>")
+	s.buf.WriteString(strconv.Itoa(int(val.Value)))
+	s.buf.WriteString("</I32>")
+
+	s.buf.WriteString("</Obj>")
 	return nil
 }
 
@@ -842,10 +939,13 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		s.buf.WriteString("<MS>")
 		// Use OrderedMemberKeys if present, otherwise sort alphabetically
 		var keys []string
+		usePool := false
 		if len(obj.OrderedMemberKeys) > 0 {
 			keys = obj.OrderedMemberKeys
 		} else {
-			keys = make([]string, 0, len(obj.Members))
+			keys = keySlicePool.Get().([]string)
+			keys = keys[:0]
+			usePool = true
 			for k := range obj.Members {
 				keys = append(keys, k)
 			}
@@ -854,8 +954,14 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		for _, propName := range keys {
 			propValue := obj.Members[propName]
 			if err := s.serializeValueWithName(propValue, propName); err != nil {
+				if usePool {
+					keySlicePool.Put(keys)
+				}
 				return fmt.Errorf("serialize member %s: %w", propName, err)
 			}
+		}
+		if usePool {
+			keySlicePool.Put(keys)
 		}
 		s.buf.WriteString("</MS>")
 	}
@@ -864,7 +970,8 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 	if len(obj.Properties) > 0 {
 		s.buf.WriteString("<Props>")
 		// Sort keys for deterministic output
-		keys := make([]string, 0, len(obj.Properties))
+		keys := keySlicePool.Get().([]string)
+		keys = keys[:0]
 		for k := range obj.Properties {
 			keys = append(keys, k)
 		}
@@ -872,9 +979,11 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		for _, propName := range keys {
 			propValue := obj.Properties[propName]
 			if err := s.serializeValueWithName(propValue, propName); err != nil {
+				keySlicePool.Put(keys)
 				return fmt.Errorf("serialize property %s: %w", propName, err)
 			}
 		}
+		keySlicePool.Put(keys)
 		s.buf.WriteString("</Props>")
 	}
 

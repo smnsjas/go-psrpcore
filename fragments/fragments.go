@@ -62,6 +62,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 )
 
 // Fragment header size in bytes.
@@ -121,6 +122,12 @@ func (f *Fragment) Encode() []byte {
 	return buf
 }
 
+var fragmentDataPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 0, 4096) // Common size
+	},
+}
+
 // Decode deserializes a fragment from bytes.
 // All multi-byte fields use big-endian per MS-PSRP Section 2.2.4.
 func Decode(data []byte) (*Fragment, error) {
@@ -130,7 +137,7 @@ func Decode(data []byte) (*Fragment, error) {
 
 	f := &Fragment{
 		// ObjectID (8 bytes, big-endian) - MS-PSRP 2.2.4
-		ObjectID:   binary.BigEndian.Uint64(data[0:8]),
+		ObjectID: binary.BigEndian.Uint64(data[0:8]),
 		// FragmentID (8 bytes, big-endian) - MS-PSRP 2.2.4
 		FragmentID: binary.BigEndian.Uint64(data[8:16]),
 		Start:      data[16]&FlagStart != 0,
@@ -143,10 +150,33 @@ func Decode(data []byte) (*Fragment, error) {
 		return nil, ErrInvalidFragment
 	}
 
-	f.Data = make([]byte, blobLen)
-	copy(f.Data, data[21:21+blobLen])
+	// Get pooled buffer
+	buf := fragmentDataPool.Get().([]byte)
+	if cap(buf) < int(blobLen) {
+		// Need larger buffer if pool buffer is too small
+		buf = make([]byte, blobLen)
+	} else {
+		buf = buf[:blobLen]
+	}
+
+	copy(buf, data[21:21+blobLen])
+	f.Data = buf
 
 	return f, nil
+}
+
+// Release returns the fragment's data buffer to the pool.
+// Use this when the fragment is no longer needed.
+func (f *Fragment) Release() {
+	if f.Data != nil {
+		// Only pool buffers that aren't too massive to avoid hoarding memory
+		// and ensure they are somewhat standard size.
+		// For now, we pool everything that fits the initial capacity or larger,
+		// but typically we might want to discard very large ones.
+		// The roadmap suggested simple pooling.
+		fragmentDataPool.Put(f.Data)
+		f.Data = nil
+	}
 }
 
 // Fragmenter splits messages into fragments.

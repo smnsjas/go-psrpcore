@@ -2,9 +2,8 @@ package outofproc
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
-	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -73,6 +72,13 @@ func NewTransportFromReadWriter(rw io.ReadWriter) *Transport {
 	return NewTransport(rw, rw)
 }
 
+// sendBufferPool recycles buffers for sending packets to reduce allocations.
+var sendBufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
 // SendData sends fragment data to the remote end.
 // The data should be one or more complete PSRP fragments.
 func (t *Transport) SendData(psGuid uuid.UUID, data []byte) error {
@@ -84,14 +90,26 @@ func (t *Transport) SendDataWithStream(psGuid uuid.UUID, stream Stream, data []b
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	encoded := base64.StdEncoding.EncodeToString(data)
-	packet := fmt.Sprintf("<Data Stream='%s' PSGuid='%s'>%s</Data>\n",
-		stream, formatGUID(psGuid), encoded)
+	buf := sendBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer sendBufferPool.Put(buf)
+
+	buf.WriteString("<Data Stream='")
+	buf.WriteString(string(stream))
+	buf.WriteString("' PSGuid='")
+	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString("'>")
+
+	encoder := base64.NewEncoder(base64.StdEncoding, buf)
+	encoder.Write(data)
+	encoder.Close()
+
+	buf.WriteString("</Data>\n")
 
 	// Debug: log what we're sending
-	fmt.Fprintf(os.Stderr, "DEBUG SEND: %s\n", truncate(packet, 200))
+	// fmt.Fprintf(os.Stderr, "DEBUG SEND: %s\n", truncate(buf.String(), 200))
 
-	_, err := t.writer.Write([]byte(packet))
+	_, err := t.writer.Write(buf.Bytes())
 	return err
 }
 
@@ -101,8 +119,15 @@ func (t *Transport) SendCommand(pipelineGuid uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	packet := fmt.Sprintf("<Command PSGuid='%s' />\n", formatGUID(pipelineGuid))
-	_, err := t.writer.Write([]byte(packet))
+	buf := sendBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer sendBufferPool.Put(buf)
+
+	buf.WriteString("<Command PSGuid='")
+	buf.WriteString(formatGUID(pipelineGuid))
+	buf.WriteString("' />\n")
+
+	_, err := t.writer.Write(buf.Bytes())
 	return err
 }
 
@@ -112,8 +137,15 @@ func (t *Transport) SendClose(psGuid uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	packet := fmt.Sprintf("<Close PSGuid='%s' />\n", formatGUID(psGuid))
-	_, err := t.writer.Write([]byte(packet))
+	buf := sendBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer sendBufferPool.Put(buf)
+
+	buf.WriteString("<Close PSGuid='")
+	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString("' />\n")
+
+	_, err := t.writer.Write(buf.Bytes())
 	return err
 }
 
@@ -122,8 +154,15 @@ func (t *Transport) SendSignal(psGuid uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	packet := fmt.Sprintf("<Signal PSGuid='%s' />\n", formatGUID(psGuid))
-	_, err := t.writer.Write([]byte(packet))
+	buf := sendBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer sendBufferPool.Put(buf)
+
+	buf.WriteString("<Signal PSGuid='")
+	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString("' />\n")
+
+	_, err := t.writer.Write(buf.Bytes())
 	return err
 }
 
@@ -132,8 +171,15 @@ func (t *Transport) SendDataAck(psGuid uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	packet := fmt.Sprintf("<DataAck PSGuid='%s' />\n", formatGUID(psGuid))
-	_, err := t.writer.Write([]byte(packet))
+	buf := sendBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer sendBufferPool.Put(buf)
+
+	buf.WriteString("<DataAck PSGuid='")
+	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString("' />\n")
+
+	_, err := t.writer.Write(buf.Bytes())
 	return err
 }
 
@@ -177,61 +223,118 @@ func (t *Transport) ReceivePacket() (*Packet, error) {
 	}
 }
 
-// parsePacket parses a single line of OutOfProcess protocol.
+// parsePacket parses a single line of OutOfProcess protocol manually for performance.
+// XML Decoder is too slow and allocates too much for this high-throughput path.
 func parsePacket(line string) (*Packet, error) {
-	decoder := xml.NewDecoder(strings.NewReader(line))
-
-	token, err := decoder.Token()
-	if err != nil {
-		return nil, fmt.Errorf("read token: %w (line: %q)", err, truncate(line, 100))
+	// Trim whitespace and BOM (rare but possible)
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "\xEF\xBB\xBF") {
+		line = line[3:]
 	}
 
-	startElem, ok := token.(xml.StartElement)
-	if !ok {
-		return nil, fmt.Errorf("expected start element, got %T (line: %q)", token, truncate(line, 100))
+	if len(line) < 5 { // Minimal packet: <A/>
+		return nil, fmt.Errorf("line too short: %q", line)
 	}
 
-	packet := &Packet{
-		Type:   PacketType(startElem.Name.Local),
-		Stream: StreamDefault,
-	}
+	packet := &Packet{Stream: StreamDefault}
 
-	// Extract attributes
-	for _, attr := range startElem.Attr {
-		switch attr.Name.Local {
-		case "PSGuid":
-			guid, err := uuid.Parse(attr.Value)
-			if err != nil {
-				return nil, fmt.Errorf("parse PSGuid %q: %w", attr.Value, err)
-			}
-			packet.PSGuid = guid
-		case "Stream":
-			packet.Stream = Stream(attr.Value)
+	// Fast path: find element name
+	// Format: <ElementName Space='...' PSGuid='...'> or <ElementName ... />
+	if line[0] != '<' {
+		return nil, fmt.Errorf("no opening < found")
+	}
+	line = line[1:] // Skip '<'
+
+	// Find end of element name
+	spaceIdx := strings.IndexByte(line, ' ')
+	closeIdx := strings.IndexByte(line, '>')
+	slashIdx := strings.IndexByte(line, '/')
+
+	var elemName string
+
+	// Logic to find the earliest delimiter
+	minIdx := -1
+	if spaceIdx != -1 {
+		minIdx = spaceIdx
+	}
+	if closeIdx != -1 {
+		if minIdx == -1 || closeIdx < minIdx {
+			minIdx = closeIdx
+		}
+	}
+	if slashIdx != -1 {
+		if minIdx == -1 || slashIdx < minIdx {
+			minIdx = slashIdx
 		}
 	}
 
-	// For Data packets, read the base64 content
+	if minIdx == -1 {
+		return nil, fmt.Errorf("malformed element name")
+	}
+
+	elemName = line[:minIdx]
+	packet.Type = PacketType(elemName)
+
+	// Extract attributes manually
+	// Looking for PSGuid='...' and Stream='...'
+	// We scan the string for these patterns. Since attributes are distinct, we can use strings.Index.
+
+	// PSGuid
+	if idx := strings.Index(line, "PSGuid='"); idx != -1 {
+		guidStart := idx + 8 // len("PSGuid='")
+		if guidStart < len(line) {
+			guidEnd := strings.IndexByte(line[guidStart:], '\'')
+			if guidEnd != -1 {
+				guidStr := line[guidStart : guidStart+guidEnd]
+				guid, err := uuid.Parse(guidStr)
+				if err != nil {
+					return nil, fmt.Errorf("parse PSGuid %q: %w", guidStr, err)
+				}
+				packet.PSGuid = guid
+			}
+		}
+	}
+
+	// Stream
+	if idx := strings.Index(line, "Stream='"); idx != -1 {
+		streamStart := idx + 8 // len("Stream='")
+		if streamStart < len(line) {
+			streamEnd := strings.IndexByte(line[streamStart:], '\'')
+			if streamEnd != -1 {
+				packet.Stream = Stream(line[streamStart : streamStart+streamEnd])
+			}
+		}
+	}
+
+	// Data Content
 	if packet.Type == PacketTypeData {
-		token, err := decoder.Token()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				// Self-closing tag with no content
-				return packet, nil
-			}
-			return nil, fmt.Errorf("read data content: %w", err)
+		// Find Content Start: First '>'
+		contentStart := strings.IndexByte(line, '>')
+		if contentStart == -1 {
+			return nil, fmt.Errorf("malformed data packet start")
+		}
+		contentStart++ // Skip '>'
+
+		// Check for self-closing <Data ... /> which means empty data
+		if line[minIdx] == '/' || (minIdx+1 < len(line) && line[minIdx+1] == '/') || strings.HasSuffix(line, "/>") {
+			// If the tag was self-closing, we might have detected it earlier or can check now.
+			// If we found '/>' before contentStart, it's empty.
+			// Simpler check: if we see </Data> at the end.
 		}
 
-		switch t := token.(type) {
-		case xml.CharData:
-			decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(t)))
-			if err != nil {
-				return nil, fmt.Errorf("decode base64: %w", err)
+		// Robust way: Find </Data> (or </ElementName>)
+		endTag := "</" + elemName + ">"
+		contentEnd := strings.LastIndex(line, endTag)
+
+		if contentEnd != -1 && contentEnd > contentStart {
+			base64Data := line[contentStart:contentEnd]
+			if len(base64Data) > 0 {
+				decoded, err := base64.StdEncoding.DecodeString(base64Data)
+				if err != nil {
+					return nil, fmt.Errorf("decode base64: %w", err)
+				}
+				packet.Data = decoded
 			}
-			packet.Data = decoded
-		case xml.EndElement:
-			// Empty data element
-		default:
-			return nil, fmt.Errorf("unexpected token type in Data element: %T", token)
 		}
 	}
 

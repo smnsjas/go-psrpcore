@@ -94,15 +94,15 @@ func main() {
 	log.Println("RunspacePool Opened Successfully!")
 
 	// Execute a command
-	log.Println("Executing 'Get-Date' via pipeline...")
-	pl, err := pool.CreatePipeline("Get-Date")
+	// Using Invoke-Expression like Ruby template does
+	log.Println("Executing via pipeline with Invoke-Expression...")
+	pl, err := pool.CreatePipeline("Invoke-Expression")
 	if err != nil {
 		log.Fatalf("CreatePipeline failed: %v", err)
 	}
 
-	// Add parameter to test CommandParameter logic and ensure Args is not empty
-	// This might help avoid NRE if the server crashes on empty args or specific code path
-	// pl.AddParameter("Format", "yyyy") // Reverting for now - caused Network Error
+	// Add -Command parameter like Ruby template
+	pl.AddParameter("Command", "Get-Date")
 
 	// Start consuming output/error in background before invoking
 	go func() {

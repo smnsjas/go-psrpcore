@@ -215,11 +215,18 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 	// Serialize the PowerShell object to CLIXML
 	serializer := serialization.NewSerializer()
 	defer serializer.Close()
+	// DEBUG TEST: Load payload from file instead of serializing
 	cmdData, err := serializer.SerializeRaw(p.powerShell)
 	if err != nil {
 		p.transition(StateFailed, err)
 		return fmt.Errorf("serialize command: %w", err)
 	}
+
+	// Remove newlines? pypsrp generally sends it compact?
+	// XML parser usually ignores whitespace but let's send exactly what we have.
+
+	// DEBUG: Print the actual serialized data
+	fmt.Printf("DEBUG CreatePipeline data (%d bytes) FROM PYPSRP:\n%s\n", len(cmdData), string(cmdData))
 
 	msg := messages.NewCreatePipeline(p.runspaceID, p.id, cmdData)
 	if err := p.transport.SendMessage(ctx, msg); err != nil {
@@ -369,9 +376,45 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 			return nil
 		}
 
-		stateVal, ok := objs[0].(int32)
-		if !ok {
-			// Fallback to Completed if we can't parse but see the message
+		// Try to extract PipelineState value - it may be a simple int32 or a complex PSObject
+		var stateVal int32
+		var exception interface{}
+
+		switch v := objs[0].(type) {
+		case int32:
+			// Simple int32 value (used in unit tests)
+			stateVal = v
+		case *serialization.PSObject:
+			// Complex PSObject (real server response)
+			// Look for PipelineState in Members first, then Properties
+			var found bool
+			if ps, ok := v.Members["PipelineState"]; ok {
+				if psInt, ok := ps.(int32); ok {
+					stateVal = psInt
+					found = true
+				}
+			}
+			if !found {
+				if ps, ok := v.Properties["PipelineState"]; ok {
+					if psInt, ok := ps.(int32); ok {
+						stateVal = psInt
+						found = true
+					}
+				}
+			}
+			if !found {
+				// Fallback to Completed
+				p.transition(StateCompleted, nil)
+				return nil
+			}
+			// Extract exception info if present
+			if exc, ok := v.Members["ExceptionAsErrorRecord"]; ok {
+				exception = exc
+			} else if exc, ok := v.Properties["ExceptionAsErrorRecord"]; ok {
+				exception = exc
+			}
+		default:
+			// Unknown type, fallback to Completed
 			p.transition(StateCompleted, nil)
 			return nil
 		}
@@ -395,7 +438,11 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		case 4: // Completed
 			p.transition(StateCompleted, nil)
 		case 5: // Failed
-			p.transition(StateFailed, fmt.Errorf("pipeline failed on server"))
+			errMsg := "pipeline failed on server"
+			if exception != nil {
+				errMsg = fmt.Sprintf("pipeline failed: %v", exception)
+			}
+			p.transition(StateFailed, errors.New(errMsg))
 		case 6: // Disconnected
 			p.transition(StateDisconnected, nil)
 		}

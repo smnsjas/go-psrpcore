@@ -83,6 +83,15 @@ type Logger interface {
 	Printf(format string, v ...interface{})
 }
 
+// MultiplexedTransport represents a transport that can send data on different streams/channels.
+// This is used by OutOfProcess transport (SSH) to separate session data from command data.
+type MultiplexedTransport interface {
+	// SendCommand sends a command creation packet.
+	SendCommand(id uuid.UUID) error
+	// SendPipelineData sends data associated with a specific pipeline.
+	SendPipelineData(id uuid.UUID, data []byte) error
+}
+
 // State represents the current state of a RunspacePool.
 type State int
 
@@ -629,6 +638,15 @@ func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 	pl := pipeline.New(p, p.id, command)
 	p.pipelines[pl.ID()] = pl
 
+	// If the transport supports MultiplexedTransport (e.g. OutOfProcess),
+	// we must send a Command creation packet before any pipeline data.
+	if mux, ok := p.transport.(MultiplexedTransport); ok {
+		if err := mux.SendCommand(pl.ID()); err != nil {
+			delete(p.pipelines, pl.ID())
+			return nil, fmt.Errorf("send command creation: %w", err)
+		}
+	}
+
 	// Start a monitoring goroutine to remove the pipeline when it's done
 	go func() {
 		_ = pl.Wait() // Wait for completion
@@ -753,6 +771,18 @@ func (p *Pool) sendMessage(ctx context.Context, msg *messages.Message) error {
 		default:
 		}
 
+		// If the transport supports MultiplexedTransport (e.g. OutOfProcess),
+		// use SendPipelineData for pipeline messages to route them to correct channel.
+		if msg.PipelineID != uuid.Nil {
+			if mux, ok := p.transport.(MultiplexedTransport); ok {
+				if err := mux.SendPipelineData(msg.PipelineID, fragData); err != nil {
+					return fmt.Errorf("write fragment (mux): %w", err)
+				}
+				continue
+			}
+		}
+
+		// Fallback to standard Write (Session Data)
 		if _, err := p.transport.Write(fragData); err != nil {
 			return fmt.Errorf("write fragment: %w", err)
 		}

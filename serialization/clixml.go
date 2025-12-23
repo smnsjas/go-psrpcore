@@ -87,9 +87,10 @@ var (
 
 // PSObject represents a PowerShell object with type information and properties.
 type PSObject struct {
-	TypeNames  []string
-	Properties map[string]interface{}
-	Members    map[string]interface{} // Extended properties (MS)
+	TypeNames         []string
+	Properties        map[string]interface{}
+	Members           map[string]interface{} // Extended properties (MS)
+	OrderedMemberKeys []string               // If set, serialize members in this order
 	// ToString optionally provides a string representation
 	ToString string
 }
@@ -800,12 +801,17 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 	// Serialize Members (MS)
 	if len(obj.Members) > 0 {
 		s.buf.WriteString("<MS>")
-		// Sort keys for deterministic output
-		keys := make([]string, 0, len(obj.Members))
-		for k := range obj.Members {
-			keys = append(keys, k)
+		// Use OrderedMemberKeys if present, otherwise sort alphabetically
+		var keys []string
+		if len(obj.OrderedMemberKeys) > 0 {
+			keys = obj.OrderedMemberKeys
+		} else {
+			keys = make([]string, 0, len(obj.Members))
+			for k := range obj.Members {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
 		}
-		sort.Strings(keys)
 		for _, propName := range keys {
 			propValue := obj.Members[propName]
 			if err := s.serializeValueWithName(propValue, propName); err != nil {
@@ -1508,7 +1514,7 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 
 	// Wrap cmds in TypedList with correct List<PSObject> TypeNames (per pypsrp/PowerShell reference)
 	// pypsrp lines 440-447: System.Collections.Generic.List`1[[System.Management.Automation.PSObject, ...]]
-	cmdsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
+	cmdsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
 	cmdsWrapper := &TypedList{
 		TypeNames: []string{cmdsListTypeName, "System.Object"},
 		Items:     cmds,
@@ -1519,73 +1525,107 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 		// PowerShell uses Members (MS), not Properties (Props) for remoting objects
 		Members: make(map[string]interface{}),
 	}
-	// MS-PSRP spec section 2.2.2.10 example shows Cmds and IsNested
-	// But PS 7.5 also REQUIRES History and RedirectShellErrorOutputPipe!
-	// pypsrp sends BOTH as Nil (not empty string or boolean)
+	// Inner PowerShell object (ToPSObjectForRemoting)
+	// Has: Cmds, IsNested, History, RedirectShellErrorOutputPipe
 	innerPS.Members["Cmds"] = cmdsWrapper
-	innerPS.Members["IsNested"] = p.IsNested
-	innerPS.Members["History"] = nil                        // Nil per pypsrp
-	innerPS.Members["RedirectShellErrorOutputPipe"] = false // PS 7.5 requires Boolean, not Nil
-	// ExtraCmds removed (caused Network Error when nil).
+	innerPS.Members["IsNested"] = p.IsNested               // IS in inner object per PowerShell reference
+	innerPS.Members["History"] = nil                       // Nil is accepted
+	innerPS.Members["RedirectShellErrorOutputPipe"] = true // PowerShell ToPSObjectForRemoting uses TRUE
+	innerPS.Members["ExtraCmds"] = nil                     // pypsrp includes ExtraCmds as Nil
+
+	// Set order to match pypsrp: IsNested, ExtraCmds, Cmds, History, RedirectShellErrorOutputPipe
+	innerPS.OrderedMemberKeys = []string{"IsNested", "ExtraCmds", "Cmds", "History", "RedirectShellErrorOutputPipe"}
 
 	// 2. Create the Root Wrapper object
-	// pypsrp uses _extended_properties which serialize to MS (Members), not Props
-	// See pypsrp/messages.py:478-486: CreatePipeline uses _extended_properties
+	// MS-PSRP spec section 2.2.2.10 example clearly shows ROOT uses <MS> (Members)
+	// We incorrectly switched to Properties based on PowerShell source, but
+	// the actual CLIXML wire format in the spec example uses <MS>
 	root := &PSObject{
-		Members: make(map[string]interface{}), // Members (MS), not Properties (Props)!
+		Members: make(map[string]interface{}), // Members (<MS>) per spec example
 	}
 
-	// 3. Add Extended Properties to Root (as Members, per pypsrp)
-	root.Members["NoInput"] = true        // pypsrp uses true (not accepting input)
-	root.Members["AddToHistory"] = false  // PowerShell default (EncodeAndDecode.cs:896)
-	root.Members["IsNested"] = p.IsNested // Only on root wrapper (pypsrp messages.py:485)
+	// 3. Add properties to Root (as Members, per MS-PSRP spec example)
+	root.Members["NoInput"] = true
+	root.Members["AddToHistory"] = true // Ruby template uses true
+	root.Members["IsNested"] = p.IsNested
 
-	// ApartmentState: MTA (1) - per MS-PSRP official spec section 2.2.2.10 example
+	// ApartmentState: Unknown (2) for macOS, MTA (1) for Windows
 	// Type = System.Threading.ApartmentState (NOT Runspaces!)
 	root.Members["ApartmentState"] = &PSRPEnum{
-		Type:     "System.Threading.ApartmentState", // Per MS-PSRP spec
-		Value:    1,                                 // MTA per spec example
+		Type:     "System.Threading.ApartmentState",
+		Value:    2, // Unknown for macOS
 		ToString: "Unknown",
 	}
 
-	// RemoteStreamOptions: AddInvocationInfo (15) - per MS-PSRP spec
-	// Type = System.Management.Automation.RemoteStreamOptions (NO 'Runspaces'!)
+	// RemoteStreamOptions: Ruby template uses 0, not 15
 	root.Members["RemoteStreamOptions"] = &PSRPEnum{
-		Type:     "System.Management.Automation.RemoteStreamOptions", // Per MS-PSRP spec
-		Value:    15,
-		ToString: "AddInvocationInfo",
+		Type:     "System.Management.Automation.RemoteStreamOptions",
+		Value:    0, // Ruby template uses 0
+		ToString: "0",
 	}
 
-	// 4. HostInfo - per pypsrp: when no host, _useRunspaceHost=true and _isHostNull=true
+	// 4. HostInfo - per MS-PSRP spec and pypsrp
 	hostInfoProps := make(map[string]interface{})
-	hostInfoProps["_isHostNull"] = true // No host implementation
+	hostInfoProps["_isHostNull"] = true
 	hostInfoProps["_isHostUINull"] = true
 	hostInfoProps["_isHostRawUINull"] = true
-	hostInfoProps["_useRunspaceHost"] = true // Use runspace's host
+	hostInfoProps["_useRunspaceHost"] = true
 
-	// MS-PSRP spec CREATE_PIPELINE example shows NO _hostDefaultData in HostInfo
-	// Only the four boolean flags
-
-	// HostInfo also uses Members (MS) per pypsrp Gold Standard - no TypeNames
+	// HostInfo uses Members (MS)
 	root.Members["HostInfo"] = &PSObject{
-		Members: hostInfoProps, // Members (MS), not Properties (Props)!
+		Members:           hostInfoProps,
+		OrderedMemberKeys: []string{"_isHostNull", "_isHostUINull", "_isHostRawUINull", "_useRunspaceHost"},
 	}
 
-	// 5. Nest the Inner Object
+	// 5. Nest the Inner PowerShell Object
 	root.Members["PowerShell"] = innerPS
+
+	// Set the order to match pypsrp template:
+	// NoInput, ApartmentState, RemoteStreamOptions, AddToHistory, HostInfo, PowerShell, IsNested
+	root.OrderedMemberKeys = []string{
+		"NoInput",
+		"ApartmentState",
+		"RemoteStreamOptions",
+		"AddToHistory",
+		"HostInfo",
+		"PowerShell",
+		"IsNested",
+	}
 
 	return root
 }
 
 // CommandToPSObject converts a Command object to a PSObject for serialization
 func CommandToPSObject(c *objects.Command) *PSObject {
-	params := make([]interface{}, len(c.Parameters))
-	for i, p := range c.Parameters {
-		params[i] = CommandParameterToPSObject(&p)
+	var params []interface{}
+	for _, p := range c.Parameters {
+		// 1. Parameter Name (if present)
+		if p.Name != "" {
+			nameObj := &PSObject{
+				Members: map[string]interface{}{
+					"N": "-" + p.Name,
+					"V": nil,
+				},
+				OrderedMemberKeys: []string{"N", "V"},
+			}
+			params = append(params, nameObj)
+		}
+
+		// 2. Parameter Value (if present, or if it was just a name we typically assume non-switch parameters have values)
+		// Logic: If Value is not nil, add it.
+		// NOTE: If Value is nil and Name is present, it acts as a SwitchParameter (e.g. -Verbose).
+		if p.Value != nil {
+			valObj := &PSObject{
+				Members: map[string]interface{}{
+					"N": nil,
+					"V": p.Value,
+				},
+				OrderedMemberKeys: []string{"N", "V"},
+			}
+			params = append(params, valObj)
+		}
 	}
 
-	// Command.ToPSObjectForRemoting() uses CreateEmptyPSObject() - no TypeNames
-	// Commands use Members (MS), not Properties (Props)
 	obj := &PSObject{
 		Members: make(map[string]interface{}),
 	}
@@ -1607,19 +1647,28 @@ func CommandToPSObject(c *objects.Command) *PSObject {
 	obj.Members["MergeToResult"] = noneEnum
 	obj.Members["MergePreviousResults"] = noneEnum // Maps to MergeUnclaimedPreviousCommandResults
 
-	// V3+ merge instructions (protocol 2.2+)
+	// V2.1 merge properties only (PowerShell ToPSObjectForRemoting)
+	// Ruby template INCLUDES these - they ARE required!
 	obj.Members["MergeError"] = noneEnum
 	obj.Members["MergeWarning"] = noneEnum
-	// MergeInformation is NOT in the MS-PSRP spec (2.2.3.12 or example 2.2.2.10)
-	// Removing it to match spec strictly. It caused Network Error when present.
+	obj.Members["MergeVerbose"] = noneEnum
+	obj.Members["MergeDebug"] = noneEnum
 
 	// Wrap Args in TypedList with correct List<PSObject> TypeNames
-	argsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
+	argsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
 	argsWrapper := &TypedList{
 		TypeNames: []string{argsListTypeName, "System.Object"},
 		Items:     params,
 	}
 	obj.Members["Args"] = argsWrapper
+
+	// Set order to match Ruby template
+	obj.OrderedMemberKeys = []string{
+		"Cmd", "IsScript", "UseLocalScope",
+		"MergeMyResult", "MergeToResult", "MergePreviousResults",
+		"MergeError", "MergeWarning", "MergeVerbose", "MergeDebug",
+		"Args",
+	}
 
 	return obj
 }

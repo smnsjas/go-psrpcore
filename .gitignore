@@ -40,3 +40,11 @@ go.work.sum
 # Environment files
 .env
 .env.local
+
+# Python virtual environments
+.venv/
+__pycache__/
+*.pyc
+
+# Reference/debug files
+*_reference*.xml

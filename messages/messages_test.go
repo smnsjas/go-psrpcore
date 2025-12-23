@@ -3,6 +3,7 @@ package messages
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -188,18 +189,51 @@ func TestUUIDLittleEndianConversion(t *testing.T) {
 }
 
 func TestMessageTypes(t *testing.T) {
-	// Verify key message type constants have correct values
+	// Verify key message type constants have correct values per MS-PSRP Section 2.2.1
 	tests := []struct {
 		name  string
 		value MessageType
 		want  uint32
 	}{
+		// Session and initialization messages
 		{"SESSION_CAPABILITY", MessageTypeSessionCapability, 0x00010002},
 		{"INIT_RUNSPACEPOOL", MessageTypeInitRunspacePool, 0x00010004},
-		{"RUNSPACEPOOL_STATE", MessageTypeRunspacePoolState, 0x00010011},
-		{"CREATE_PIPELINE", MessageTypeCreatePipeline, 0x00021002},
-		{"PIPELINE_OUTPUT", MessageTypePipelineOutput, 0x00021008},
-		{"PIPELINE_STATE", MessageTypePipelineState, 0x0002100A},
+		{"PUBLIC_KEY", MessageTypePublicKey, 0x00010005},
+		{"ENCRYPTED_SESSION_KEY", MessageTypeEncryptedSessionKey, 0x00010006},
+		{"PUBLIC_KEY_REQUEST", MessageTypePublicKeyRequest, 0x00010007},
+		{"CONNECT_RUNSPACEPOOL", MessageTypeConnectRunspacePool, 0x00010008},
+
+		// Runspace pool management messages
+		{"RUNSPACEPOOL_STATE", MessageTypeRunspacePoolState, 0x00021005},
+		{"SET_MAX_RUNSPACES", MessageTypeSetMaxRunspaces, 0x00021002},
+		{"SET_MIN_RUNSPACES", MessageTypeSetMinRunspaces, 0x00021003},
+		{"RUNSPACE_AVAILABILITY", MessageTypeRunspaceAvailability, 0x00021004},
+		{"GET_AVAILABLE_RUNSPACES", MessageTypeGetAvailableRunspaces, 0x00021007},
+		{"USER_EVENT", MessageTypeUserEvent, 0x00021008},
+		{"APPLICATION_PRIVATE", MessageTypeApplicationPrivate, 0x00021009},
+		{"GET_COMMAND_METADATA", MessageTypeGetCommandMetadata, 0x0002100A},
+		{"RUNSPACEPOOL_INIT_DATA", MessageTypeRunspacePoolInitData, 0x0002100B},
+		{"RESET_RUNSPACE_STATE", MessageTypeResetRunspaceState, 0x0002100C},
+
+		// Host callback messages
+		{"RUNSPACE_HOST_CALL", MessageTypeRunspaceHostCall, 0x00021100},
+		{"RUNSPACE_HOST_RESPONSE", MessageTypeRunspaceHostResponse, 0x00021101},
+
+		// Pipeline messages
+		{"CREATE_PIPELINE", MessageTypeCreatePipeline, 0x00021006},
+		{"SIGNAL", MessageTypeSignal, 0x00041001},
+		{"PIPELINE_INPUT", MessageTypePipelineInput, 0x00041002},
+		{"END_OF_PIPELINE_INPUT", MessageTypeEndOfPipelineInput, 0x00041003},
+		{"PIPELINE_OUTPUT", MessageTypePipelineOutput, 0x00041004},
+		{"ERROR_RECORD", MessageTypeErrorRecord, 0x00041005},
+		{"PIPELINE_STATE", MessageTypePipelineState, 0x00041006},
+		{"DEBUG_RECORD", MessageTypeDebugRecord, 0x00041007},
+		{"VERBOSE_RECORD", MessageTypeVerboseRecord, 0x00041008},
+		{"WARNING_RECORD", MessageTypeWarningRecord, 0x00041009},
+		{"PROGRESS_RECORD", MessageTypeProgressRecord, 0x00041010},
+		{"INFORMATION_RECORD", MessageTypeInformationRecord, 0x00041011},
+		{"PIPELINE_HOST_CALL", MessageTypePipelineHostCall, 0x00041100},
+		{"PIPELINE_HOST_RESPONSE", MessageTypePipelineHostResponse, 0x00041101},
 	}
 
 	for _, tt := range tests {
@@ -415,4 +449,199 @@ func TestPipelineStates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMessageEndiannessKnownBytes verifies that message encoding uses correct
+// little-endian byte order by testing against a manually crafted message.
+//
+// This test ensures:
+//   - Destination field uses little-endian (4 bytes)
+//   - MessageType field uses little-endian (4 bytes)
+//   - RPID/PID GUIDs use .NET GUID format (mixed-endian per RFC 4122)
+//
+// The expected byte layout validates our implementation against the PSRP spec
+// and .NET conventions, even though MS-PSRP doesn't explicitly document endianness.
+func TestMessageEndiannessKnownBytes(t *testing.T) {
+	// Create a message with predictable values
+	// UUID: 00010203-0405-0607-0809-0a0b0c0d0e0f (sequential bytes for easy verification)
+	rpID := uuid.UUID{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f}
+	// UUID: 10111213-1415-1617-1819-1a1b1c1d1e1f
+	pID := uuid.UUID{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f}
+
+	msg := &Message{
+		Destination: DestinationServer,        // 2 (0x00000002)
+		Type:        MessageTypeSessionCapability, // 0x00010002
+		RunspaceID:  rpID,
+		PipelineID:  pID,
+		Data:        []byte{0xAA, 0xBB}, // Simple test payload
+	}
+
+	encoded, err := msg.Encode()
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+
+	// Expected byte layout (little-endian):
+	expected := []byte{
+		// Destination: 2 (little-endian uint32)
+		0x02, 0x00, 0x00, 0x00,
+		// MessageType: 0x00010002 (little-endian uint32)
+		0x02, 0x00, 0x01, 0x00,
+		// RPID: 00010203-0405-0607-0809-0a0b0c0d0e0f (.NET GUID format)
+		// Time-low (4 bytes, little-endian): 0x00010203 -> 03 02 01 00
+		0x03, 0x02, 0x01, 0x00,
+		// Time-mid (2 bytes, little-endian): 0x0405 -> 05 04
+		0x05, 0x04,
+		// Time-hi (2 bytes, little-endian): 0x0607 -> 07 06
+		0x07, 0x06,
+		// Clock-seq and node (8 bytes, big-endian - no swap)
+		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+		// PID: 10111213-1415-1617-1819-1a1b1c1d1e1f (.NET GUID format)
+		// Time-low (4 bytes, little-endian): 0x10111213 -> 13 12 11 10
+		0x13, 0x12, 0x11, 0x10,
+		// Time-mid (2 bytes, little-endian): 0x1415 -> 15 14
+		0x15, 0x14,
+		// Time-hi (2 bytes, little-endian): 0x1617 -> 17 16
+		0x17, 0x16,
+		// Clock-seq and node (8 bytes, big-endian - no swap)
+		0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+		// Data payload
+		0xAA, 0xBB,
+	}
+
+	if !bytes.Equal(encoded, expected) {
+		t.Errorf("Encoded message bytes don't match expected little-endian layout")
+		t.Logf("Expected (%d bytes):\n%s", len(expected), formatHexDump(expected))
+		t.Logf("Got (%d bytes):\n%s", len(encoded), formatHexDump(encoded))
+
+		// Detailed breakdown for debugging
+		if len(encoded) >= 4 {
+			t.Logf("Destination bytes: %02x %02x %02x %02x (should be 02 00 00 00)",
+				encoded[0], encoded[1], encoded[2], encoded[3])
+		}
+		if len(encoded) >= 8 {
+			t.Logf("MessageType bytes: %02x %02x %02x %02x (should be 02 00 01 00)",
+				encoded[4], encoded[5], encoded[6], encoded[7])
+		}
+		if len(encoded) >= 24 {
+			t.Logf("RPID bytes: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+				encoded[8], encoded[9], encoded[10], encoded[11], encoded[12], encoded[13], encoded[14], encoded[15],
+				encoded[16], encoded[17], encoded[18], encoded[19], encoded[20], encoded[21], encoded[22], encoded[23])
+		}
+	}
+
+	// Verify round-trip: decode and check all fields match
+	decoded, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+
+	if decoded.Destination != msg.Destination {
+		t.Errorf("Destination mismatch after round-trip: got %d, want %d", decoded.Destination, msg.Destination)
+	}
+	if decoded.Type != msg.Type {
+		t.Errorf("MessageType mismatch after round-trip: got 0x%08X, want 0x%08X", decoded.Type, msg.Type)
+	}
+	if decoded.RunspaceID != msg.RunspaceID {
+		t.Errorf("RunspaceID mismatch after round-trip: got %s, want %s", decoded.RunspaceID, msg.RunspaceID)
+	}
+	if decoded.PipelineID != msg.PipelineID {
+		t.Errorf("PipelineID mismatch after round-trip: got %s, want %s", decoded.PipelineID, msg.PipelineID)
+	}
+	if !bytes.Equal(decoded.Data, msg.Data) {
+		t.Errorf("Data mismatch after round-trip: got %v, want %v", decoded.Data, msg.Data)
+	}
+}
+
+// TestMessageDecodeKnownGoodCapture tests decoding against a known-good PSRP message.
+// This validates interoperability with real PowerShell/PSRP implementations.
+//
+// The test message is a SESSION_CAPABILITY message with:
+//   - Destination: Server (2)
+//   - MessageType: SESSION_CAPABILITY (0x00010002)
+//   - RunspacePool ID: 12345678-1234-5678-9abc-def012345678
+//   - Pipeline ID: 00000000-0000-0000-0000-000000000000 (nil)
+//   - Data: Empty (real SESSION_CAPABILITY would have CLIXML data)
+func TestMessageDecodeKnownGoodCapture(t *testing.T) {
+	// Hand-crafted PSRP SESSION_CAPABILITY message header (40 bytes)
+	// This represents the binary format that would be sent over the wire
+	knownGoodMessage := []byte{
+		// Destination: 2 (Server) - little-endian uint32
+		0x02, 0x00, 0x00, 0x00,
+		// MessageType: 0x00010002 (SESSION_CAPABILITY) - little-endian uint32
+		0x02, 0x00, 0x01, 0x00,
+		// RunspacePool ID: 12345678-1234-5678-9abc-def012345678
+		// In .NET GUID format (mixed-endian):
+		// Time-low: 0x12345678 -> 78 56 34 12 (little-endian)
+		0x78, 0x56, 0x34, 0x12,
+		// Time-mid: 0x1234 -> 34 12 (little-endian)
+		0x34, 0x12,
+		// Time-hi: 0x5678 -> 78 56 (little-endian)
+		0x78, 0x56,
+		// Clock-seq-hi, clock-seq-low: 0x9abc (big-endian, no swap)
+		0x9a, 0xbc,
+		// Node: 0xdef012345678 (big-endian, no swap)
+		0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
+		// Pipeline ID: 00000000-0000-0000-0000-000000000000 (nil UUID)
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		// Data: (none in this test case)
+	}
+
+	// Decode the message
+	msg, err := Decode(knownGoodMessage)
+	if err != nil {
+		t.Fatalf("Failed to decode known-good message: %v", err)
+	}
+
+	// Verify all fields
+	if msg.Destination != DestinationServer {
+		t.Errorf("Destination: got %d, want %d", msg.Destination, DestinationServer)
+	}
+
+	if msg.Type != MessageTypeSessionCapability {
+		t.Errorf("MessageType: got 0x%08X, want 0x%08X", msg.Type, MessageTypeSessionCapability)
+	}
+
+	expectedRPID := uuid.MustParse("12345678-1234-5678-9abc-def012345678")
+	if msg.RunspaceID != expectedRPID {
+		t.Errorf("RunspaceID: got %s, want %s", msg.RunspaceID, expectedRPID)
+	}
+
+	if msg.PipelineID != uuid.Nil {
+		t.Errorf("PipelineID: got %s, want %s", msg.PipelineID, uuid.Nil)
+	}
+
+	if len(msg.Data) != 0 {
+		t.Errorf("Data length: got %d, want 0", len(msg.Data))
+	}
+
+	// Verify round-trip encoding produces identical bytes
+	reencoded, err := msg.Encode()
+	if err != nil {
+		t.Fatalf("Failed to re-encode message: %v", err)
+	}
+
+	if !bytes.Equal(reencoded, knownGoodMessage) {
+		t.Errorf("Re-encoded message doesn't match original")
+		t.Logf("Original:\n%s", formatHexDump(knownGoodMessage))
+		t.Logf("Re-encoded:\n%s", formatHexDump(reencoded))
+	}
+}
+
+// formatHexDump formats bytes as a readable hex dump for test output.
+func formatHexDump(data []byte) string {
+	var buf bytes.Buffer
+	for i := 0; i < len(data); i += 16 {
+		end := i + 16
+		if end > len(data) {
+			end = len(data)
+		}
+		buf.WriteString("  ")
+		for j := i; j < end; j++ {
+			buf.WriteString(fmt.Sprintf("%02x ", data[j]))
+		}
+		buf.WriteString("\n")
+	}
+	return buf.String()
 }

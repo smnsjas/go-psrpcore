@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/smnsjas/go-psrpcore/fragments"
 	"github.com/smnsjas/go-psrpcore/messages"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 // blockingTransport uses io.Pipe to provide a thread-safe, blocking transport.
@@ -182,6 +183,51 @@ func TestEndToEndFunctional(t *testing.T) {
 		}
 		if msg.Type != messages.MessageTypeCreatePipeline {
 			errChan <- fmt.Errorf("server expected CreatePipeline, got %v", msg.Type)
+			return
+		}
+
+		// Validate payload contains required properties
+		deser := serialization.NewDeserializer()
+		objs, err := deser.Deserialize(msg.Data)
+		if err != nil {
+			errChan <- fmt.Errorf("server failed to deserialize CreatePipeline payload: %w", err)
+			return
+		}
+		if len(objs) == 0 {
+			errChan <- fmt.Errorf("server received empty CreatePipeline payload")
+			return
+		}
+
+		psObj, ok := objs[0].(*serialization.PSObject)
+		if !ok {
+			errChan <- fmt.Errorf("expected PSObject in CreatePipeline payload, got %T", objs[0])
+			return
+		}
+
+		// Check for required extended properties
+		requiredProps := []string{"HostInfo", "ApartmentState", "RemoteStreamOptions", "RedirectShellErrorOutputPipe"}
+		for _, prop := range requiredProps {
+			if _, ok := psObj.Properties[prop]; !ok {
+				errChan <- fmt.Errorf("CreatePipeline payload missing required property: %s", prop)
+				return
+			}
+		}
+
+		// Check for nested "PowerShell" property containing Cmds
+		psProp, ok := psObj.Properties["PowerShell"]
+		if !ok {
+			errChan <- fmt.Errorf("CreatePipeline payload missing 'PowerShell' property")
+			return
+		}
+
+		innerPS, ok := psProp.(*serialization.PSObject)
+		if !ok {
+			errChan <- fmt.Errorf("'PowerShell' property is not a PSObject")
+			return
+		}
+
+		if _, ok := innerPS.Properties["Cmds"]; !ok {
+			errChan <- fmt.Errorf("Inner 'PowerShell' object missing 'Cmds' property")
 			return
 		}
 

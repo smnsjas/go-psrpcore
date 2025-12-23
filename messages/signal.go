@@ -4,7 +4,7 @@ import "github.com/google/uuid"
 
 // NewSignal creates a SIGNAL message.
 // This is used to stop a running pipeline (Ctrl+C).
-// MS-PSRP Section 2.2.2.10
+// MS-PSRP Section 2.2.3.13
 func NewSignal(runspaceID, pipelineID uuid.UUID) *Message {
 	return &Message{
 		Destination: DestinationServer,

@@ -331,7 +331,7 @@ type PowerShell struct {
 func NewPowerShell() *PowerShell {
 	return &PowerShell{
 		Commands: make([]Command, 0),
-		History:  "None",
+		History:  "", // Empty string instead of "None"
 	}
 }
 

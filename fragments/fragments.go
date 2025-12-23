@@ -21,6 +21,20 @@
 //	│  Blob (variable) - Fragment payload                    │
 //	└─────────────────────────────────────────────────────────┘
 //
+// # Byte Order (Endianness)
+//
+// ALL multi-byte integer fields in fragment headers use BIG-ENDIAN (network byte order).
+// This is explicitly specified in MS-PSRP Section 2.2.4:
+//
+//	"ObjectId, FragmentId, and BlobLength are in network-byte order (big-endian)"
+//
+// IMPORTANT: This differs from PSRP message headers, which use little-endian.
+// The endianness difference exists because:
+//   - Fragments are the transport layer (network-facing)
+//   - Messages are the application layer (.NET/Windows-facing)
+//
+// Reference: MS-PSRP Section 2.2.4 - "Fragementation Protocol"
+//
 // # Usage
 //
 // To fragment a message:
@@ -78,10 +92,13 @@ type Fragment struct {
 }
 
 // Encode serializes the fragment to bytes.
+// All multi-byte fields use big-endian per MS-PSRP Section 2.2.4.
 func (f *Fragment) Encode() []byte {
 	buf := make([]byte, HeaderSize+len(f.Data))
 
+	// ObjectID (8 bytes, big-endian) - MS-PSRP 2.2.4
 	binary.BigEndian.PutUint64(buf[0:8], f.ObjectID)
+	// FragmentID (8 bytes, big-endian) - MS-PSRP 2.2.4
 	binary.BigEndian.PutUint64(buf[8:16], f.FragmentID)
 
 	var flags byte
@@ -97,6 +114,7 @@ func (f *Fragment) Encode() []byte {
 		// Should never happen with reasonable fragment sizes
 		panic("fragment data too large")
 	}
+	// BlobLength (4 bytes, big-endian) - MS-PSRP 2.2.4
 	binary.BigEndian.PutUint32(buf[17:21], uint32(len(f.Data))) // #nosec G115 -- length checked against MaxUint32 above
 	copy(buf[21:], f.Data)
 
@@ -104,18 +122,22 @@ func (f *Fragment) Encode() []byte {
 }
 
 // Decode deserializes a fragment from bytes.
+// All multi-byte fields use big-endian per MS-PSRP Section 2.2.4.
 func Decode(data []byte) (*Fragment, error) {
 	if len(data) < HeaderSize {
 		return nil, ErrInvalidFragment
 	}
 
 	f := &Fragment{
+		// ObjectID (8 bytes, big-endian) - MS-PSRP 2.2.4
 		ObjectID:   binary.BigEndian.Uint64(data[0:8]),
+		// FragmentID (8 bytes, big-endian) - MS-PSRP 2.2.4
 		FragmentID: binary.BigEndian.Uint64(data[8:16]),
 		Start:      data[16]&FlagStart != 0,
 		End:        data[16]&FlagEnd != 0,
 	}
 
+	// BlobLength (4 bytes, big-endian) - MS-PSRP 2.2.4
 	blobLen := binary.BigEndian.Uint32(data[17:21])
 	if len(data) < HeaderSize+int(blobLen) {
 		return nil, ErrInvalidFragment

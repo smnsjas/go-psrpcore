@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/smnsjas/go-psrpcore/host"
 	"github.com/smnsjas/go-psrpcore/messages"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 // mockTransport is a mock implementation of Transport for testing.
@@ -131,11 +132,18 @@ func TestPipeline_Completion(t *testing.T) {
 	p := New(transport, uuid.New(), "test")
 	_ = p.Invoke(context.Background())
 
+	// Serialize state value 4 (Completed) as CLIXML
+	ser := serialization.NewSerializer()
+	stateData, err := ser.Serialize(int32(4))
+	if err != nil {
+		t.Fatalf("failed to serialize state: %v", err)
+	}
+
 	// Simulate State Completed
 	stateMsg := &messages.Message{
 		Type:       messages.MessageTypePipelineState,
 		PipelineID: p.ID(),
-		// In reality this would contain CLIXML state
+		Data:       stateData,
 	}
 
 	// Handle completion
@@ -214,5 +222,353 @@ func TestPipeline_Input(t *testing.T) {
 	msgEnd := transport.sent[2]
 	if msgEnd.Type != messages.MessageTypeEndOfPipelineInput {
 		t.Errorf("expected EndOfPipelineInput message, got %v", msgEnd.Type)
+	}
+}
+
+// TestPipeline_StateTransitions tests all PSInvocationState values from MS-PSRP Section 2.2.3.9.
+// This test verifies that the pipeline correctly handles state transitions for all valid
+// PSInvocationState enum values (0-6) as defined in the PSRP protocol specification.
+func TestPipeline_StateTransitions(t *testing.T) {
+	tests := []struct {
+		name          string
+		stateValue    int32 // PSInvocationState enum value
+		expectedState State
+		isTerminal    bool // Terminal states should close doneCh
+	}{
+		{
+			name:          "NotStarted (0)",
+			stateValue:    0,
+			expectedState: StateNotStarted,
+			isTerminal:    false,
+		},
+		{
+			name:          "Running (1)",
+			stateValue:    1,
+			expectedState: StateRunning,
+			isTerminal:    false,
+		},
+		{
+			name:          "Stopping (2)",
+			stateValue:    2,
+			expectedState: StateStopping,
+			isTerminal:    false,
+		},
+		{
+			name:          "Stopped (3)",
+			stateValue:    3,
+			expectedState: StateStopped,
+			isTerminal:    true,
+		},
+		{
+			name:          "Completed (4)",
+			stateValue:    4,
+			expectedState: StateCompleted,
+			isTerminal:    true,
+		},
+		{
+			name:          "Failed (5)",
+			stateValue:    5,
+			expectedState: StateFailed,
+			isTerminal:    true,
+		},
+		{
+			name:          "Disconnected (6)",
+			stateValue:    6,
+			expectedState: StateDisconnected,
+			isTerminal:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &mockTransport{}
+			p := New(transport, uuid.New(), "test")
+
+			// Invoke to transition to Running state
+			_ = p.Invoke(context.Background())
+
+			// Serialize the state value as CLIXML
+			ser := serialization.NewSerializer()
+			defer ser.Close()
+			stateData, err := ser.Serialize(tt.stateValue)
+			if err != nil {
+				t.Fatalf("failed to serialize state value %d: %v", tt.stateValue, err)
+			}
+
+			// Create PIPELINE_STATE message with the state value
+			stateMsg := &messages.Message{
+				Type:       messages.MessageTypePipelineState,
+				PipelineID: p.ID(),
+				RunspaceID: p.runspaceID,
+				Data:       stateData,
+			}
+
+			// Handle the state message
+			err = p.HandleMessage(stateMsg)
+			if err != nil {
+				t.Fatalf("HandleMessage failed: %v", err)
+			}
+
+			// Verify the state transition
+			if p.State() != tt.expectedState {
+				t.Errorf("expected state %v (%d), got %v (%d)",
+					tt.expectedState, tt.expectedState,
+					p.State(), p.State())
+			}
+
+			// Verify terminal states close the doneCh
+			if tt.isTerminal {
+				select {
+				case <-p.doneCh:
+					// Success - terminal state closed the channel
+				case <-time.After(100 * time.Millisecond):
+					t.Errorf("terminal state %v did not close doneCh", tt.expectedState)
+				}
+
+				// Verify Wait() returns without blocking
+				done := make(chan struct{})
+				go func() {
+					_ = p.Wait()
+					close(done)
+				}()
+
+				select {
+				case <-done:
+					// Success - Wait() returned
+				case <-time.After(100 * time.Millisecond):
+					t.Errorf("Wait() blocked for terminal state %v", tt.expectedState)
+				}
+			} else {
+				// Non-terminal states should NOT close doneCh
+				select {
+				case <-p.doneCh:
+					t.Errorf("non-terminal state %v incorrectly closed doneCh", tt.expectedState)
+				case <-time.After(50 * time.Millisecond):
+					// Success - channel remains open
+				}
+			}
+		})
+	}
+}
+
+// TestPipeline_StateString verifies that all State values have proper string representations.
+func TestPipeline_StateString(t *testing.T) {
+	tests := []struct {
+		state    State
+		expected string
+	}{
+		{StateNotStarted, "NotStarted"},
+		{StateRunning, "Running"},
+		{StateStopping, "Stopping"},
+		{StateStopped, "Stopped"},
+		{StateCompleted, "Completed"},
+		{StateFailed, "Failed"},
+		{StateDisconnected, "Disconnected"},
+		{State(99), "Unknown(99)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			got := tt.state.String()
+			if got != tt.expected {
+				t.Errorf("State(%d).String() = %q, want %q", tt.state, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestPipeline_ChannelTimeout verifies the timeout-based back-pressure mechanism.
+// When the output buffer is full, HandleMessage should block for up to channelTimeout
+// before returning ErrBufferFull.
+func TestPipeline_ChannelTimeout(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+
+	// Set a very short timeout for testing
+	p.SetChannelTimeout(100 * time.Millisecond)
+
+	_ = p.Invoke(context.Background())
+
+	// Fill the output buffer completely (100 messages)
+	for i := 0; i < 100; i++ {
+		msg := &messages.Message{
+			Type:       messages.MessageTypePipelineOutput,
+			PipelineID: p.ID(),
+			Data:       []byte("test output"),
+		}
+		if err := p.HandleMessage(msg); err != nil {
+			t.Fatalf("HandleMessage failed on message %d: %v", i, err)
+		}
+	}
+
+	// The buffer is now full. The next message should block and timeout.
+	msg := &messages.Message{
+		Type:       messages.MessageTypePipelineOutput,
+		PipelineID: p.ID(),
+		Data:       []byte("overflow message"),
+	}
+
+	start := time.Now()
+	err := p.HandleMessage(msg)
+	elapsed := time.Since(start)
+
+	// Verify we got the expected error
+	if !errors.Is(err, ErrBufferFull) {
+		t.Errorf("expected ErrBufferFull, got: %v", err)
+	}
+
+	// Verify it waited approximately the timeout duration
+	if elapsed < 90*time.Millisecond || elapsed > 200*time.Millisecond {
+		t.Errorf("timeout took %v, expected ~100ms", elapsed)
+	}
+}
+
+// TestPipeline_ChannelBackpressure verifies that slow consumers create back-pressure.
+// When messages can be consumed, they should be delivered even after initially filling the buffer.
+func TestPipeline_ChannelBackpressure(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+
+	// Set a reasonable timeout
+	p.SetChannelTimeout(2 * time.Second)
+
+	_ = p.Invoke(context.Background())
+
+	// Fill the buffer
+	for i := 0; i < 100; i++ {
+		msg := &messages.Message{
+			Type:       messages.MessageTypePipelineOutput,
+			PipelineID: p.ID(),
+			Data:       []byte("test output"),
+		}
+		if err := p.HandleMessage(msg); err != nil {
+			t.Fatalf("HandleMessage failed on message %d: %v", i, err)
+		}
+	}
+
+	// Start a goroutine that slowly consumes messages
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		for i := 0; i < 10; i++ {
+			<-p.Output()
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	// Try to send more messages - they should be delivered as space becomes available
+	for i := 0; i < 5; i++ {
+		msg := &messages.Message{
+			Type:       messages.MessageTypePipelineOutput,
+			PipelineID: p.ID(),
+			Data:       []byte("backpressure test"),
+		}
+		start := time.Now()
+		err := p.HandleMessage(msg)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Errorf("message %d failed: %v (elapsed: %v)", i, err, elapsed)
+		}
+
+		// Messages should be delivered within the timeout
+		if elapsed > 2*time.Second {
+			t.Errorf("message %d took too long: %v", i, elapsed)
+		}
+	}
+}
+
+// TestPipeline_ChannelContextCancellation verifies that HandleMessage respects
+// context cancellation and returns immediately when the pipeline is closed.
+func TestPipeline_ChannelContextCancellation(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+
+	// Set a long timeout so we can test context cancellation
+	p.SetChannelTimeout(10 * time.Second)
+
+	_ = p.Invoke(context.Background())
+
+	// Fill the buffer
+	for i := 0; i < 100; i++ {
+		msg := &messages.Message{
+			Type:       messages.MessageTypePipelineOutput,
+			PipelineID: p.ID(),
+			Data:       []byte("test output"),
+		}
+		if err := p.HandleMessage(msg); err != nil {
+			t.Fatalf("HandleMessage failed on message %d: %v", i, err)
+		}
+	}
+
+	// Start a goroutine that will try to send a message (will block on full buffer)
+	errChan := make(chan error, 1)
+	go func() {
+		msg := &messages.Message{
+			Type:       messages.MessageTypePipelineOutput,
+			PipelineID: p.ID(),
+			Data:       []byte("will be cancelled"),
+		}
+		errChan <- p.HandleMessage(msg)
+	}()
+
+	// Give the goroutine time to start blocking
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel the pipeline context
+	p.cancel()
+
+	// The HandleMessage call should return with context.Canceled error
+	select {
+	case err := <-errChan:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled, got: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("HandleMessage did not return after context cancellation")
+	}
+}
+
+// TestPipeline_ErrorChannelTimeout verifies timeout behavior for the error channel.
+// This ensures that the error channel has the same back-pressure mechanism as the output channel.
+func TestPipeline_ErrorChannelTimeout(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+
+	// Set a very short timeout for testing
+	p.SetChannelTimeout(100 * time.Millisecond)
+
+	_ = p.Invoke(context.Background())
+
+	// Fill the error buffer completely (100 messages)
+	for i := 0; i < 100; i++ {
+		msg := &messages.Message{
+			Type:       messages.MessageTypeErrorRecord,
+			PipelineID: p.ID(),
+			Data:       []byte("test error"),
+		}
+		if err := p.HandleMessage(msg); err != nil {
+			t.Fatalf("HandleMessage failed on message %d: %v", i, err)
+		}
+	}
+
+	// The buffer is now full. The next message should block and timeout.
+	msg := &messages.Message{
+		Type:       messages.MessageTypeErrorRecord,
+		PipelineID: p.ID(),
+		Data:       []byte("overflow error"),
+	}
+
+	start := time.Now()
+	err := p.HandleMessage(msg)
+	elapsed := time.Since(start)
+
+	// Verify we got the expected error
+	if !errors.Is(err, ErrBufferFull) {
+		t.Errorf("expected ErrBufferFull, got: %v", err)
+	}
+
+	// Verify it waited approximately the timeout duration
+	if elapsed < 90*time.Millisecond || elapsed > 200*time.Millisecond {
+		t.Errorf("timeout took %v, expected ~100ms", elapsed)
 	}
 }

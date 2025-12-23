@@ -12,6 +12,7 @@ import (
 	"github.com/smnsjas/go-psrpcore/fragments"
 	"github.com/smnsjas/go-psrpcore/host"
 	"github.com/smnsjas/go-psrpcore/messages"
+	"github.com/smnsjas/go-psrpcore/pipeline"
 )
 
 // mockTransport is a mock transport for testing.
@@ -450,6 +451,147 @@ func TestContextCancellation(t *testing.T) {
 	// Pool should be in Broken state after failed open
 	if pool.State() != StateBroken {
 		t.Errorf("expected state Broken after failed open, got %v", pool.State())
+	}
+}
+
+// TestDispatchLoopTransportError tests that transport errors in dispatchLoop
+// properly transition the pool to broken state and clean up resources.
+func TestDispatchLoopTransportError(t *testing.T) {
+	// Use io.Pipe to simulate a closeable connection
+	serverReader, clientWriter := io.Pipe()
+	clientReader, serverWriter := io.Pipe()
+
+	// Create a wrapper that implements io.ReadWriter
+	transport := &struct {
+		io.Reader
+		io.Writer
+	}{
+		Reader: clientReader,
+		Writer: clientWriter,
+	}
+
+	poolID := uuid.New()
+	pool := New(transport, poolID)
+
+	// Helper to send messages from "server" side
+	sendServerMessage := func(msg *messages.Message) error {
+		encoded, err := msg.Encode()
+		if err != nil {
+			return err
+		}
+		fragmenter := fragments.NewFragmenter(32768)
+		frags, err := fragmenter.Fragment(encoded)
+		if err != nil {
+			return err
+		}
+		for _, frag := range frags {
+			if _, err := serverWriter.Write(frag.Encode()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Start a goroutine to handle the handshake
+	go func() {
+		// Read and discard SESSION_CAPABILITY from client
+		header := make([]byte, fragments.HeaderSize)
+		io.ReadFull(serverReader, header)
+		blobLen := binary.BigEndian.Uint32(header[17:21])
+		io.ReadFull(serverReader, make([]byte, blobLen))
+
+		// Send SESSION_CAPABILITY response
+		capabilityData := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <Obj RefId="0">
+    <MS>
+      <S N="protocolversion">2.3</S>
+    </MS>
+  </Obj>
+</Objs>`)
+		capMsg := &messages.Message{
+			Destination: messages.DestinationClient,
+			Type:        messages.MessageTypeSessionCapability,
+			RunspaceID:  poolID,
+			Data:        capabilityData,
+		}
+		sendServerMessage(capMsg)
+
+		// Read and discard INIT_RUNSPACEPOOL from client
+		io.ReadFull(serverReader, header)
+		blobLen = binary.BigEndian.Uint32(header[17:21])
+		io.ReadFull(serverReader, make([]byte, blobLen))
+
+		// Send RUNSPACEPOOL_STATE response
+		stateData := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <I32>2</I32>
+</Objs>`)
+		stateMsg := &messages.Message{
+			Destination: messages.DestinationClient,
+			Type:        messages.MessageTypeRunspacePoolState,
+			RunspaceID:  poolID,
+			Data:        stateData,
+		}
+		sendServerMessage(stateMsg)
+	}()
+
+	// Open pool
+	ctx := context.Background()
+	if err := pool.Open(ctx); err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	// Verify pool is opened
+	if pool.State() != StateOpened {
+		t.Fatalf("expected state Opened, got %v", pool.State())
+	}
+
+	// Create a pipeline
+	pl, err := pool.CreatePipeline("Get-Date")
+	if err != nil {
+		t.Fatalf("CreatePipeline failed: %v", err)
+	}
+
+	// Verify pipeline exists in the map
+	pool.mu.RLock()
+	if _, ok := pool.pipelines[pl.ID()]; !ok {
+		pool.mu.RUnlock()
+		t.Fatal("Pipeline not found in pool's pipeline map")
+	}
+	pool.mu.RUnlock()
+
+	// Close the server side to simulate a transport error
+	// This will cause the next receiveMessage to fail with EOF
+	serverWriter.Close()
+	clientReader.Close()
+
+	// Wait for pool to detect the error and transition to broken
+	select {
+	case <-pool.doneCh:
+		// Expected - pool detected error and closed doneCh
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for pool to detect transport error")
+	}
+
+	// Verify pool is in broken state
+	if pool.State() != StateBroken {
+		t.Errorf("expected state Broken after transport error, got %v", pool.State())
+	}
+
+	// Verify the pipeline was transitioned to failed
+	if pl.State() != pipeline.StateFailed {
+		t.Errorf("expected pipeline state Failed, got %v", pl.State())
+	}
+
+	// Verify pipeline.Wait() returns with an error
+	if err := pl.Wait(); err == nil {
+		t.Error("expected pipeline.Wait() to return error after pool broke")
+	}
+
+	// Verify cleanupError was stored
+	if pool.cleanupError == nil {
+		t.Error("expected cleanupError to be set")
 	}
 }
 

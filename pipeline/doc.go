@@ -12,12 +12,31 @@
 //	             ↓         ↓
 //	             Stopped   Failed
 //
+// # Channel Buffer Management
+//
+// Output and error channels use buffered channels (default 100 messages) with
+// timeout-based back-pressure to prevent unbounded memory growth:
+//
+//   - Messages are delivered immediately if the buffer has space (fast path)
+//   - If the buffer is full, HandleMessage blocks for up to channelTimeout (default 5s)
+//   - After timeout, HandleMessage returns ErrBufferFull
+//   - Consumers should read from channels continuously to avoid buffer saturation
+//   - The timeout is configurable via SetChannelTimeout()
+//
+// This approach provides:
+//   - Back-pressure: Slow consumers naturally slow down message processing
+//   - Deadlock prevention: Timeout ensures HandleMessage doesn't block indefinitely
+//   - Memory bounds: Buffer size + timeout limit maximum memory usage
+//
 // # Usage
 //
 //	pipeline, err := pool.CreatePipeline("Get-Process")
 //	if err != nil {
 //	    return err
 //	}
+//
+//	// Optional: Configure channel timeout
+//	pipeline.SetChannelTimeout(10 * time.Second)
 //
 //	// Start execution (async)
 //	if err := pipeline.Invoke(); err != nil {

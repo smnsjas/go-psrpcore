@@ -50,7 +50,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 
 	"github.com/google/uuid"
@@ -76,6 +75,13 @@ var (
 	// ErrProtocolViolation is returned when the server violates the PSRP protocol.
 	ErrProtocolViolation = errors.New("protocol violation")
 )
+
+// Logger is an optional interface for debug logging.
+// If not set, no logging is performed.
+type Logger interface {
+	// Printf formats and logs a debug message.
+	Printf(format string, v ...interface{})
+}
 
 // State represents the current state of a RunspacePool.
 type State int
@@ -140,9 +146,11 @@ type Pool struct {
 	negotiatedMinRunspaces int
 
 	// Host callback handling
-	// Host callback handling
 	host                host.Host
 	hostCallbackHandler *host.CallbackHandler
+
+	// Debug logging
+	logger Logger
 
 	// Metadata
 	metadataCh chan *messages.Message
@@ -157,8 +165,10 @@ type Pool struct {
 	doneCh     chan struct{}
 
 	// Lifecycle
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx          context.Context
+	cancel       context.CancelFunc
+	cleanupOnce  sync.Once
+	cleanupError error // Store the error that caused the breakdown
 }
 
 // New creates a new RunspacePool with the given transport and ID.
@@ -199,6 +209,20 @@ func (p *Pool) SetHost(h host.Host) error {
 	}
 	p.host = h
 	p.hostCallbackHandler = host.NewCallbackHandler(h)
+	return nil
+}
+
+// SetLogger sets the logger for debug logging.
+// This is optional - if not set, no logging is performed.
+// Must be called before Open().
+func (p *Pool) SetLogger(logger Logger) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state != StateBeforeOpen {
+		return ErrInvalidState
+	}
+	p.logger = logger
 	return nil
 }
 
@@ -362,24 +386,21 @@ func (p *Pool) setState(newState State) {
 }
 
 // setBroken transitions the pool to the Broken state.
-// Can be called from any state.
+// Can be called from any state. This is used during the Open sequence
+// when an error occurs before dispatchLoop is running.
 func (p *Pool) setBroken() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.setState(StateBroken)
+	// Note: doneCh is not closed here because it's only closed by handleTransportError
+	// when dispatchLoop is running. During Open(), the caller handles cleanup.
 }
 
 // sendSessionCapability sends the SESSION_CAPABILITY message to the server.
 func (p *Pool) sendSessionCapability(ctx context.Context) error {
-	// TODO: Build proper capability data with protocol version, etc.
-	// For now, send minimal capability
-	capabilityData := []byte(`<Obj RefId="0">
-  <MS>
-    <Version N="protocolversion">2.3</Version>
-    <Version N="PSVersion">2.0</Version>
-    <Version N="SerializationVersion">1.1.0.1</Version>
-  </MS>
-</Obj>`)
+	// SESSION_CAPABILITY uses raw <Obj> without <Objs> wrapper per MS-PSRP
+	// XML must be compact (no whitespace) for OutOfProcess transport
+	capabilityData := []byte(`<Obj RefId="0"><MS><Version N="protocolversion">2.3</Version><Version N="PSVersion">2.0</Version><Version N="SerializationVersion">1.1.0.1</Version></MS></Obj>`)
 
 	msg := messages.NewSessionCapability(uuid.Nil, capabilityData)
 	return p.sendMessage(ctx, msg)
@@ -426,57 +447,30 @@ func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 	p.mu.RLock()
 	minRunspaces := p.minRunspaces
 	maxRunspaces := p.maxRunspaces
-	h := p.host
 	p.mu.RUnlock()
 
-	// Create HostInfo object
-	hostInfo := &serialization.PSObject{
-		TypeNames:  []string{"System.Management.Automation.Remoting.RemoteHostInfo"},
-		Properties: make(map[string]interface{}),
-	}
-	if h != nil {
-		hostInfo.Properties["_hostName"] = h.GetName()
-		v := h.GetVersion()
-		hostInfo.Properties["_hostVersion"] = objects.Version{
-			Major:    v.Major,
-			Minor:    v.Minor,
-			Build:    v.Build,
-			Revision: v.Revision,
-		}
-		hostInfo.Properties["_hostInstanceId"] = uuid.New() // Emits <G> tag
-		hostInfo.Properties["_hostDefaultCulture"] = h.GetCurrentCulture()
-		hostInfo.Properties["_hostDefaultUICulture"] = h.GetCurrentUICulture()
-		hostInfo.Properties["_isHostNull"] = false
-		hostInfo.Properties["_isHostUINull"] = false // UI() is available
-		hostInfo.Properties["_isHostRawUINull"] = true
-		hostInfo.Properties["_isHostUseInteractive"] = false // Batch mode
-	} else {
-		hostInfo.Properties["_isHostNull"] = true
-	}
+	// Build INIT_RUNSPACEPOOL XML manually to match exact PowerShell format
+	// Per MS-PSRP, this uses <MS> (MemberSet) format, not <Props>
+	initData := fmt.Sprintf(`<Obj RefId="0"><MS>`+
+		`<I32 N="MinRunspaces">%d</I32>`+
+		`<I32 N="MaxRunspaces">%d</I32>`+
+		`<Obj N="PSThreadOptions" RefId="1">`+
+		`<TN RefId="0"><T>System.Management.Automation.Runspaces.PSThreadOptions</T><T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>`+
+		`<ToString>Default</ToString><I32>0</I32></Obj>`+
+		`<Obj N="ApartmentState" RefId="2">`+
+		`<TN RefId="1"><T>System.Threading.ApartmentState</T><T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>`+
+		`<ToString>Unknown</ToString><I32>2</I32></Obj>`+
+		`<Obj N="HostInfo" RefId="3"><MS>`+
+		`<B N="_isHostNull">true</B>`+
+		`<B N="_isHostUINull">true</B>`+
+		`<B N="_isHostRawUINull">true</B>`+
+		`<B N="_useRunspaceHost">true</B>`+
+		`</MS></Obj>`+
+		`<Nil N="ApplicationArguments"/>`+
+		`</MS></Obj>`,
+		minRunspaces, maxRunspaces)
 
-	// Construct the Main Initialization Object
-	initObj := &serialization.PSObject{
-		TypeNames:  []string{"System.Management.Automation.Runspaces.RunspacePoolInitInfo"},
-		Properties: make(map[string]interface{}),
-	}
-	initObj.Properties["MinRunspaces"] = int32(minRunspaces)
-	initObj.Properties["MaxRunspaces"] = int32(maxRunspaces)
-	initObj.Properties["PSThreadOptions"] = int32(0) // Default
-	initObj.Properties["ApartmentState"] = int32(2)  // MTA
-	initObj.Properties["HostInfo"] = hostInfo
-	initObj.Properties["ApplicationArguments"] = make(map[string]interface{})
-	initObj.Properties["ApplicationPrivateData"] = make(map[string]interface{})
-
-	// Serialize
-	ser := serialization.NewSerializer()
-	initData, err := ser.Serialize(initObj)
-	if err != nil {
-		return fmt.Errorf("serialize init data: %w", err)
-	}
-
-	log.Printf("INIT PAYLOAD:\n%s", string(initData))
-
-	msg := messages.NewInitRunspacePool(p.id, initData)
+	msg := messages.NewInitRunspacePool(p.id, []byte(initData))
 	return p.sendMessage(ctx, msg)
 }
 
@@ -494,7 +488,7 @@ func (p *Pool) GetCommandMetadata(ctx context.Context, names []string) ([]*objec
 
 	// Serialize the request (list of strings)
 	serializer := serialization.NewSerializer()
-	data, err := serializer.Serialize(names)
+	data, err := serializer.SerializeRaw(names)
 	if err != nil {
 		return nil, fmt.Errorf("serialize metadata request: %w", err)
 	}
@@ -568,43 +562,54 @@ func parseCommandMetadata(data []byte) ([]*objects.CommandMetadata, error) {
 }
 
 // waitForOpened waits for the RUNSPACEPOOL_STATE message indicating the pool is opened.
+// The server may send RUNSPACEPOOL_INIT_DATA (ApplicationPrivate) before RUNSPACEPOOL_STATE.
 func (p *Pool) waitForOpened(ctx context.Context) error {
-	msg, err := p.receiveMessageWithHostCallbacks(ctx)
-	if err != nil {
-		return err
-	}
+	for {
+		msg, err := p.receiveMessageWithHostCallbacks(ctx)
+		if err != nil {
+			return err
+		}
 
-	if msg.Type != messages.MessageTypeRunspacePoolState {
-		return fmt.Errorf("%w: expected RUNSPACEPOOL_STATE, got %v", ErrProtocolViolation, msg.Type)
-	}
+		switch msg.Type {
+		case messages.MessageTypeApplicationPrivate, messages.MessageTypeRunspacePoolInitData:
+			// Server sent initialization data - store or log it, then continue waiting
+			// This contains application private data from the server
+			p.logf("Received RUNSPACEPOOL_INIT_DATA")
+			continue
 
-	// Parse the state message
-	stateInfo, err := parseRunspacePoolState(msg.Data)
-	if err != nil {
-		return fmt.Errorf("parse runspace pool state: %w", err)
-	}
+		case messages.MessageTypeRunspacePoolState:
+			// Parse the state message
+			stateInfo, err := parseRunspacePoolState(msg.Data)
+			if err != nil {
+				return fmt.Errorf("parse runspace pool state: %w", err)
+			}
 
-	// Verify the state is Opened
-	if stateInfo.State != messages.RunspacePoolStateOpened {
-		return fmt.Errorf("%w: expected state Opened, got %d", ErrInvalidState, stateInfo.State)
-	}
+			// Verify the state is Opened
+			if stateInfo.State != messages.RunspacePoolStateOpened {
+				return fmt.Errorf("%w: expected state Opened, got %d", ErrInvalidState, stateInfo.State)
+			}
 
-	// Store negotiated runspace counts if provided
-	p.mu.Lock()
-	if stateInfo.MinRunspaces > 0 {
-		p.negotiatedMinRunspaces = stateInfo.MinRunspaces
-	} else {
-		p.negotiatedMinRunspaces = p.minRunspaces
-	}
-	if stateInfo.MaxRunspaces > 0 {
-		p.negotiatedMaxRunspaces = stateInfo.MaxRunspaces
-	} else {
-		p.negotiatedMaxRunspaces = p.maxRunspaces
-	}
-	p.setState(StateOpened)
-	p.mu.Unlock()
+			// Store negotiated runspace counts if provided
+			p.mu.Lock()
+			if stateInfo.MinRunspaces > 0 {
+				p.negotiatedMinRunspaces = stateInfo.MinRunspaces
+			} else {
+				p.negotiatedMinRunspaces = p.minRunspaces
+			}
+			if stateInfo.MaxRunspaces > 0 {
+				p.negotiatedMaxRunspaces = stateInfo.MaxRunspaces
+			} else {
+				p.negotiatedMaxRunspaces = p.maxRunspaces
+			}
+			p.setState(StateOpened)
+			p.mu.Unlock()
 
-	return nil
+			return nil
+
+		default:
+			return fmt.Errorf("%w: expected RUNSPACEPOOL_STATE, got %v", ErrProtocolViolation, msg.Type)
+		}
+	}
 }
 
 // SendMessage sends a PSRP message to the server (implements pipeline.Transport).
@@ -653,8 +658,8 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 
 		msg, err := p.receiveMessage(ctx)
 		if err != nil {
-			// TODO: Handle disconnection/error
-			// For now, simple exit (or maybe set Broken)
+			// Transport error - transition to broken state and clean up
+			p.handleTransportError(err)
 			return
 		}
 
@@ -665,9 +670,13 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			p.mu.RUnlock()
 
 			if exists {
-				// Non-blocking handle?
-				// HandleMessage in pipeline should be fast (just channel send)
-				_ = pl.HandleMessage(msg)
+				// HandleMessage can block with timeout if pipeline's channel buffers are full.
+				// This provides back-pressure to prevent unbounded memory growth.
+				if err := pl.HandleMessage(msg); err != nil {
+					// If HandleMessage fails (buffer timeout or context cancelled),
+					// mark the pipeline as failed to signal the error to the consumer.
+					pl.Fail(err)
+				}
 			}
 			continue
 		}
@@ -679,7 +688,7 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			go func() {
 				if err := p.handleHostCall(ctx, msg); err != nil {
 					// Handling host call failed (likely transport error), pool is likely broken
-					p.setBroken()
+					p.handleTransportError(fmt.Errorf("host call failed: %w", err))
 				}
 			}()
 			// Handle metadata replies
@@ -695,6 +704,29 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			// Handle state changes if any (e.g. Broken/Closed from server)
 		}
 	}
+}
+
+// handleTransportError handles a transport error by transitioning to broken state
+// and cleaning up all resources. It uses sync.Once to ensure cleanup only happens once.
+func (p *Pool) handleTransportError(err error) {
+	p.cleanupOnce.Do(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		// Store the error that caused the breakdown
+		p.cleanupError = err
+
+		// Transition to broken state
+		p.setState(StateBroken)
+
+		// Close all pipeline channels by transitioning them to failed state
+		for _, pl := range p.pipelines {
+			pl.Fail(fmt.Errorf("runspace pool broken: %w", err))
+		}
+
+		// Notify any waiting goroutines
+		close(p.doneCh)
+	})
 }
 
 // sendMessage sends a PSRP message through the transport.
@@ -743,7 +775,6 @@ func (p *Pool) receiveMessage(ctx context.Context) (*messages.Message, error) {
 		if _, err := io.ReadFull(p.transport, header); err != nil {
 			return nil, fmt.Errorf("read fragment header: %w", err)
 		}
-		log.Printf("RECV FRAG HEADER: %x", header)
 
 		// Read blob data
 		// The blob length is at offset 17 in the header (big-endian)
@@ -770,7 +801,6 @@ func (p *Pool) receiveMessage(ctx context.Context) (*messages.Message, error) {
 		}
 
 		if complete {
-			log.Printf("MSG COMPLETE (%d bytes)", len(msgData))
 			// Decode message
 			msg, err := messages.Decode(msgData)
 			if err != nil {
@@ -904,11 +934,36 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 
 	info := &runspacePoolStateInfo{}
 
-	// The state should be an Int32
-	if state, ok := objs[0].(int32); ok {
-		info.State = messages.RunspacePoolState(state)
-	} else {
-		return nil, fmt.Errorf("state is not int32, got %T", objs[0])
+	// The state can be either a raw Int32 or a PSObject with RunspaceState property
+	switch v := objs[0].(type) {
+	case int32:
+		info.State = messages.RunspacePoolState(v)
+	case *serialization.PSObject:
+		// Look for RunspaceState or RunspacePoolState property
+		if state, ok := v.Properties["RunspaceState"].(int32); ok {
+			info.State = messages.RunspacePoolState(state)
+		} else if state, ok := v.Properties["RunspacePoolState"].(int32); ok {
+			info.State = messages.RunspacePoolState(state)
+		} else {
+			// Try to find any int32 property that might be the state
+			for key, val := range v.Properties {
+				if state, ok := val.(int32); ok {
+					// Likely the state value
+					info.State = messages.RunspacePoolState(state)
+					_ = key // suppress unused warning
+					break
+				}
+			}
+		}
+		// Also check for min/max runspaces in the same object
+		if min, ok := v.Properties["MinRunspaces"].(int32); ok {
+			info.MinRunspaces = int(min)
+		}
+		if max, ok := v.Properties["MaxRunspaces"].(int32); ok {
+			info.MaxRunspaces = int(max)
+		}
+	default:
+		return nil, fmt.Errorf("state is not int32 or PSObject, got %T", objs[0])
 	}
 
 	// Additional objects may contain min/max runspaces
@@ -924,4 +979,15 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 	}
 
 	return info, nil
+}
+
+// logf logs a debug message if a logger is configured.
+func (p *Pool) logf(format string, v ...interface{}) {
+	p.mu.RLock()
+	logger := p.logger
+	p.mu.RUnlock()
+
+	if logger != nil {
+		logger.Printf(format, v...)
+	}
 }

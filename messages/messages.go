@@ -19,6 +19,30 @@
 //	│  Data (variable) - CLIXML encoded payload              │
 //	└─────────────────────────────────────────────────────────┘
 //
+// # Byte Order (Endianness)
+//
+// All multi-byte integer fields in PSRP message headers use LITTLE-ENDIAN byte order.
+// This follows the .NET GUID/structure serialization convention used by PowerShell.
+//
+// While MS-PSRP does not explicitly document the byte order for message headers,
+// several factors confirm little-endian is correct:
+//
+//   - MS-PSRP Section 2.2.5.2 explicitly specifies little-endian for PUBLIC_KEY message
+//   - .NET's System.Guid serialization uses little-endian (mixed-endian) format
+//   - PowerShell is primarily a Windows/.NET technology where little-endian is standard
+//   - The reference Python implementation (psrpcore) uses little-endian throughout
+//
+// GUIDs (RPID/PID) use the .NET GUID serialization format (RFC 4122 mixed-endian):
+//   - First 3 components (time-low, time-mid, time-hi) are little-endian
+//   - Last 2 components (clock-seq, node) are big-endian
+//
+// IMPORTANT: This differs from fragment headers, which use big-endian (MS-PSRP 2.2.4).
+// The endianness difference exists because:
+//   - Fragments are the transport layer (network-facing) - BIG-ENDIAN
+//   - Messages are the application layer (.NET/Windows-facing) - LITTLE-ENDIAN
+//
+// Reference: MS-PSRP Section 2.2.1 (Messages), Section 2.2.5.2 (PUBLIC_KEY)
+//
 // # Message Categories
 //
 // Messages are grouped by functionality:
@@ -55,43 +79,89 @@ const (
 type MessageType uint32
 
 // Session and capability message types.
+// Reference: MS-PSRP Section 2.2.1
 const (
-	MessageTypeSessionCapability     MessageType = 0x00010002
-	MessageTypeInitRunspacePool      MessageType = 0x00010004
-	MessageTypePublicKey             MessageType = 0x00010005
-	MessageTypeEncryptedSessionKey   MessageType = 0x00010006
-	MessageTypePublicKeyRequest      MessageType = 0x00010007
-	MessageTypeSetMaxRunspaces       MessageType = 0x00010008
-	MessageTypeSetMinRunspaces       MessageType = 0x00010009
-	MessageTypeGetAvailableRunspaces MessageType = 0x0001000A
-	MessageTypeUserEvent             MessageType = 0x0001000B
-	MessageTypeConnectRunspacePool   MessageType = 0x0001000C
-	MessageTypeRunspacePoolInitData  MessageType = 0x0001000D
-	MessageTypeRunspaceAvailability  MessageType = 0x00010010
-	MessageTypeRunspacePoolState     MessageType = 0x00010011
-	MessageTypeApplicationPrivate    MessageType = 0x00010021
-	MessageTypeGetCommandMetadata    MessageType = 0x00010022
+	// Session capability exchange - MS-PSRP 2.2.5.1
+	MessageTypeSessionCapability MessageType = 0x00010002
+	// Runspace pool initialization - MS-PSRP 2.2.2.1
+	MessageTypeInitRunspacePool MessageType = 0x00010004
+	// Public key for encryption - MS-PSRP 2.2.5.2
+	MessageTypePublicKey MessageType = 0x00010005
+	// Encrypted session key - MS-PSRP 2.2.5.3
+	MessageTypeEncryptedSessionKey MessageType = 0x00010006
+	// Request for public key - MS-PSRP 2.2.5.4
+	MessageTypePublicKeyRequest MessageType = 0x00010007
+	// Connect to existing runspace pool - MS-PSRP 2.2.2.9
+	MessageTypeConnectRunspacePool MessageType = 0x00010008
+	// Runspace pool state change - MS-PSRP 2.2.2.2
+	MessageTypeRunspacePoolState MessageType = 0x00021005
+)
+
+// Runspace pool management message types.
+// Reference: MS-PSRP Section 2.2.2
+const (
+	// Set maximum runspaces - MS-PSRP 2.2.2.3
+	MessageTypeSetMaxRunspaces MessageType = 0x00021002
+	// Set minimum runspaces - MS-PSRP 2.2.2.4
+	MessageTypeSetMinRunspaces MessageType = 0x00021003
+	// Runspace availability notification - MS-PSRP 2.2.2.5
+	MessageTypeRunspaceAvailability MessageType = 0x00021004
+	// Get available runspaces - MS-PSRP 2.2.2.6
+	MessageTypeGetAvailableRunspaces MessageType = 0x00021007
+	// User event - MS-PSRP 2.2.2.7
+	MessageTypeUserEvent MessageType = 0x00021008
+	// Application private data - MS-PSRP 2.2.2.8
+	MessageTypeApplicationPrivate MessageType = 0x00021009
+	// Get command metadata - MS-PSRP 2.2.3.1
+	MessageTypeGetCommandMetadata MessageType = 0x0002100A
+	// Runspace pool initialization data - MS-PSRP 2.2.2.10
+	MessageTypeRunspacePoolInitData MessageType = 0x0002100B
+	// Reset runspace state - MS-PSRP 2.2.2.11
+	MessageTypeResetRunspaceState MessageType = 0x0002100C
+)
+
+// Host callback message types.
+// Reference: MS-PSRP Section 2.2.4
+const (
+	// Runspace pool host call - MS-PSRP 2.2.4.1
+	MessageTypeRunspaceHostCall MessageType = 0x00021100
+	// Runspace pool host response - MS-PSRP 2.2.4.2
+	MessageTypeRunspaceHostResponse MessageType = 0x00021101
 )
 
 // Pipeline message types.
+// Reference: MS-PSRP Section 2.2.3
 const (
-	MessageTypeCreatePipeline          MessageType = 0x00021002
-	MessageTypeGetCommandMetadataReply MessageType = 0x00021003
-	MessageTypeRunspaceHostCall        MessageType = 0x00021004
-	MessageTypeRunspaceHostResponse    MessageType = 0x00021005
-	MessageTypePipelineInput           MessageType = 0x00021006
-	MessageTypeEndOfPipelineInput      MessageType = 0x00021007
-	MessageTypePipelineOutput          MessageType = 0x00021008
-	MessageTypeErrorRecord             MessageType = 0x00021009
-	MessageTypePipelineState           MessageType = 0x0002100A
-	MessageTypeDebugRecord             MessageType = 0x00021010
-	MessageTypeVerboseRecord           MessageType = 0x00021011
-	MessageTypeWarningRecord           MessageType = 0x00021012
-	MessageTypeProgressRecord          MessageType = 0x00021013
-	MessageTypeInformationRecord       MessageType = 0x00021014
-	MessageTypePipelineHostCall        MessageType = 0x00021100
-	MessageTypePipelineHostResponse    MessageType = 0x00021101
-	MessageTypeSignal                  MessageType = 0x0002100B
+	// Create pipeline - MS-PSRP 2.2.3.2
+	MessageTypeCreatePipeline MessageType = 0x00021006
+	// Get command metadata reply - MS-PSRP 2.2.3.1
+	MessageTypeGetCommandMetadataReply MessageType = 0x0002100A
+	// Signal pipeline (stop/interrupt) - MS-PSRP 2.2.3.13
+	MessageTypeSignal MessageType = 0x00041001
+	// Pipeline input data - MS-PSRP 2.2.3.3
+	MessageTypePipelineInput MessageType = 0x00041002
+	// End of pipeline input - MS-PSRP 2.2.3.4
+	MessageTypeEndOfPipelineInput MessageType = 0x00041003
+	// Pipeline output data - MS-PSRP 2.2.3.5
+	MessageTypePipelineOutput MessageType = 0x00041004
+	// Error record - MS-PSRP 2.2.3.6
+	MessageTypeErrorRecord MessageType = 0x00041005
+	// Pipeline state - MS-PSRP 2.2.3.7
+	MessageTypePipelineState MessageType = 0x00041006
+	// Debug record - MS-PSRP 2.2.3.8
+	MessageTypeDebugRecord MessageType = 0x00041007
+	// Verbose record - MS-PSRP 2.2.3.9
+	MessageTypeVerboseRecord MessageType = 0x00041008
+	// Warning record - MS-PSRP 2.2.3.10
+	MessageTypeWarningRecord MessageType = 0x00041009
+	// Progress record - MS-PSRP 2.2.3.11
+	MessageTypeProgressRecord MessageType = 0x00041010
+	// Information record - MS-PSRP 2.2.3.12
+	MessageTypeInformationRecord MessageType = 0x00041011
+	// Pipeline host call - MS-PSRP 2.2.4.3
+	MessageTypePipelineHostCall MessageType = 0x00041100
+	// Pipeline host response - MS-PSRP 2.2.4.4
+	MessageTypePipelineHostResponse MessageType = 0x00041101
 )
 
 // Message header size in bytes.
@@ -115,37 +185,40 @@ type Message struct {
 
 // Encode serializes the message to bytes.
 // Format: Destination (4) + MessageType (4) + RPID (16) + PID (16) + Data
-// All fields are little-endian. UUIDs are stored in little-endian byte order.
+// All fields are little-endian per .NET serialization conventions.
+// Reference: MS-PSRP Section 2.2.1, Section 2.2.5.2
 func (m *Message) Encode() ([]byte, error) {
 	buf := make([]byte, HeaderSize+len(m.Data))
 
-	// Destination (4 bytes, little-endian)
+	// Destination (4 bytes, little-endian) - MS-PSRP 2.2.1
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(m.Destination))
 
-	// MessageType (4 bytes, little-endian)
+	// MessageType (4 bytes, little-endian) - MS-PSRP 2.2.1
 	binary.LittleEndian.PutUint32(buf[4:8], uint32(m.Type))
 
-	// RunspacePool ID (16 bytes, little-endian UUID)
+	// RunspacePool ID (16 bytes, .NET GUID format) - MS-PSRP 2.2.1
 	rpidBytes, err := uuidToLittleEndianBytes(m.RunspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("encode RPID: %w", err)
 	}
 	copy(buf[8:24], rpidBytes)
 
-	// Pipeline ID (16 bytes, little-endian UUID)
+	// Pipeline ID (16 bytes, .NET GUID format) - MS-PSRP 2.2.1
 	pidBytes, err := uuidToLittleEndianBytes(m.PipelineID)
 	if err != nil {
 		return nil, fmt.Errorf("encode PID: %w", err)
 	}
 	copy(buf[24:40], pidBytes)
 
-	// Data (variable length)
+	// Data (variable length, CLIXML encoded)
 	copy(buf[40:], m.Data)
 
 	return buf, nil
 }
 
 // Decode deserializes a message from bytes.
+// All fields are little-endian per .NET serialization conventions.
+// Reference: MS-PSRP Section 2.2.1, Section 2.2.5.2
 func Decode(data []byte) (*Message, error) {
 	if len(data) < HeaderSize {
 		return nil, fmt.Errorf("%w: got %d bytes, need at least %d", ErrMessageTooShort, len(data), HeaderSize)
@@ -153,20 +226,20 @@ func Decode(data []byte) (*Message, error) {
 
 	m := &Message{}
 
-	// Destination (4 bytes, little-endian)
+	// Destination (4 bytes, little-endian) - MS-PSRP 2.2.1
 	m.Destination = Destination(binary.LittleEndian.Uint32(data[0:4]))
 
-	// MessageType (4 bytes, little-endian)
+	// MessageType (4 bytes, little-endian) - MS-PSRP 2.2.1
 	m.Type = MessageType(binary.LittleEndian.Uint32(data[4:8]))
 
-	// RunspacePool ID (16 bytes, little-endian UUID)
+	// RunspacePool ID (16 bytes, .NET GUID format) - MS-PSRP 2.2.1
 	rpid, err := uuidFromLittleEndianBytes(data[8:24])
 	if err != nil {
 		return nil, fmt.Errorf("decode RPID: %w", err)
 	}
 	m.RunspaceID = rpid
 
-	// Pipeline ID (16 bytes, little-endian UUID)
+	// Pipeline ID (16 bytes, .NET GUID format) - MS-PSRP 2.2.1
 	pid, err := uuidFromLittleEndianBytes(data[24:40])
 	if err != nil {
 		return nil, fmt.Errorf("decode PID: %w", err)
@@ -313,15 +386,30 @@ func NewGetCommandMetadata(runspaceID uuid.UUID, data []byte) *Message {
 }
 
 // PipelineState represents the state of a pipeline.
+// These values correspond to the PSInvocationState enum defined in MS-PSRP Section 2.2.3.9.
 type PipelineState int32
 
 const (
-	PipelineStateNotStarted   PipelineState = 0
-	PipelineStateRunning      PipelineState = 1
-	PipelineStateStopping     PipelineState = 2
-	PipelineStateStopped      PipelineState = 3
-	PipelineStateCompleted    PipelineState = 4
-	PipelineStateFailed       PipelineState = 5
+	// PipelineStateNotStarted indicates the pipeline has not been invoked yet.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 0.
+	PipelineStateNotStarted PipelineState = 0
+	// PipelineStateRunning indicates the pipeline is currently executing.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 1.
+	PipelineStateRunning PipelineState = 1
+	// PipelineStateStopping indicates the pipeline is in the process of stopping.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 2.
+	PipelineStateStopping PipelineState = 2
+	// PipelineStateStopped indicates the pipeline has been stopped.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 3.
+	PipelineStateStopped PipelineState = 3
+	// PipelineStateCompleted indicates the pipeline completed successfully.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 4.
+	PipelineStateCompleted PipelineState = 4
+	// PipelineStateFailed indicates the pipeline failed with an error.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 5.
+	PipelineStateFailed PipelineState = 5
+	// PipelineStateDisconnected indicates the pipeline is in disconnected state.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 6.
 	PipelineStateDisconnected PipelineState = 6
 )
 

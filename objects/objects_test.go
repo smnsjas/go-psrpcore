@@ -6,20 +6,25 @@ import (
 
 func TestSecureString(t *testing.T) {
 	t.Parallel()
+
+	// given: a plaintext password
 	plaintext := "MySecretPassword"
 
-	// Test creation
+	// when: creating a SecureString
 	ss, err := NewSecureString(plaintext)
+
+	// then: creation succeeds and encrypted bytes are available
 	if err != nil {
 		t.Fatalf("NewSecureString failed: %v", err)
 	}
-
 	if ss.EncryptedBytes() == nil {
 		t.Error("EncryptedBytes returned nil")
 	}
 
-	// Test Decrypt
+	// when: decrypting the SecureString
 	decrypted, err := ss.Decrypt()
+
+	// then: decrypted value matches original plaintext
 	if err != nil {
 		t.Fatalf("Decrypt failed: %v", err)
 	}
@@ -27,16 +32,13 @@ func TestSecureString(t *testing.T) {
 		t.Errorf("Decrypt mismatch: got %q, want %q", string(decrypted), plaintext)
 	}
 
-	// Test Clear
+	// when: clearing the SecureString
 	ss.Clear()
-	// After clear, decrypt might fail or return garbage/zeros, or internal state is zeroed.
-	// Since we are white-box testing to some extent, we can verify internals if we want,
-	// but behaviorally, Decrypt might now fail or return empty/different.
-	// In the current implementation, key is zeroed, so Aes creation will likely fail or produce garbage if key is all zeros (valid key but wrong one).
-	// Actually, 32 bytes of zeros IS a valid AES-256 key, but the GCM tag validation will fail because key changed.
+
+	// then: decryption should fail (key zeroed, GCM tag validation fails)
 	_, err = ss.Decrypt()
 	if err == nil {
-		t.Error("Decrypt should fail after Clear (GCM tag validation failure expected due to key change)")
+		t.Error("Decrypt should fail after Clear")
 	}
 }
 

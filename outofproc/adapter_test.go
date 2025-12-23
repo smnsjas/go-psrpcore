@@ -11,38 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// mockReadWriter is a simple mock for testing the adapter.
-type mockReadWriter struct {
-	reader *strings.Reader
-	writer *bytes.Buffer
-	mu     sync.Mutex
-}
-
-func newMockReadWriter(input string) *mockReadWriter {
-	return &mockReadWriter{
-		reader: strings.NewReader(input),
-		writer: &bytes.Buffer{},
-	}
-}
-
-func (m *mockReadWriter) Read(p []byte) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.reader.Read(p)
-}
-
-func (m *mockReadWriter) Write(p []byte) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.writer.Write(p)
-}
-
-func (m *mockReadWriter) Written() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.writer.String()
-}
-
 func TestAdapterWrite(t *testing.T) {
 	var buf bytes.Buffer
 	transport := NewTransport(strings.NewReader(""), &buf)

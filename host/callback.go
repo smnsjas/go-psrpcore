@@ -354,7 +354,7 @@ func (h *CallbackHandler) HandleCall(call *RemoteHostCall) *RemoteHostResponse {
 		MethodIDPopRunspace,
 		MethodIDGetIsRunspacePushed,
 		MethodIDGetRunspace:
-		err = fmt.Errorf("Runspace method %s not implemented", call.MethodID)
+		err = fmt.Errorf("runspace method %s not implemented", call.MethodID)
 
 	// Additional methods (56)
 	case MethodIDPromptForChoiceMultipleSelection:

@@ -9,51 +9,216 @@ import (
 )
 
 // MethodID represents a PSHostUserInterface method identifier.
+// MS-PSRP Section 2.2.3.17 defines all 56 method identifiers.
 type MethodID int32
 
-// Host method IDs mapping to PSHostUserInterface methods.
+// PSHost methods (1-8)
 const (
-	MethodIDRead                MethodID = 1  // Read user input from console
-	MethodIDReadLine            MethodID = 2  // Read a line of user input
-	MethodIDWriteErrorLine      MethodID = 3  // Write an error message
-	MethodIDWrite               MethodID = 4  // Write output to console
-	MethodIDWriteDebugLine      MethodID = 5  // Write debug output
-	MethodIDWriteVerboseLine    MethodID = 6  // Write verbose output
-	MethodIDWriteWarningLine    MethodID = 7  // Write warning output
-	MethodIDWriteInformation    MethodID = 8  // Write information output
-	MethodIDPrompt              MethodID = 9  // Prompt user with options
-	MethodIDPromptForCredential MethodID = 10 // Prompt for PSCredential
-	MethodIDPromptForChoice     MethodID = 11 // Prompt user to choose from options
-	MethodIDPromptForPassword   MethodID = 12 // Prompt for password (SecureString)
+	MethodIDGetName             MethodID = 1 // Get host name
+	MethodIDGetVersion          MethodID = 2 // Get host version
+	MethodIDGetInstanceId       MethodID = 3 // Get host instance ID (GUID)
+	MethodIDGetCurrentCulture   MethodID = 4 // Get current culture (e.g., "en-US")
+	MethodIDGetCurrentUICulture MethodID = 5 // Get current UI culture
+	MethodIDSetShouldExit       MethodID = 6 // Set exit code and exit
+	MethodIDEnterNestedPrompt   MethodID = 7 // Enter nested prompt
+	MethodIDExitNestedPrompt    MethodID = 8 // Exit nested prompt
+)
+
+// PSHost application notification methods (9-10)
+const (
+	MethodIDNotifyBeginApplication MethodID = 9  // Notify application started
+	MethodIDNotifyEndApplication   MethodID = 10 // Notify application ended
+)
+
+// PSHostUserInterface methods (11-26)
+const (
+	MethodIDReadLine                      MethodID = 11 // Read a line of user input
+	MethodIDReadLineAsSecureString        MethodID = 12 // Read sensitive input
+	MethodIDWrite1                        MethodID = 13 // Write(string value)
+	MethodIDWrite2                        MethodID = 14 // Write(ConsoleColor foreground, ConsoleColor background, string value)
+	MethodIDWriteLine1                    MethodID = 15 // WriteLine()
+	MethodIDWriteLine2                    MethodID = 16 // WriteLine(string value)
+	MethodIDWriteLine3                    MethodID = 17 // WriteLine(ConsoleColor foreground, ConsoleColor background, string value)
+	MethodIDWriteErrorLine                MethodID = 18 // Write an error message
+	MethodIDWriteDebugLine                MethodID = 19 // Write debug output
+	MethodIDWriteProgress                 MethodID = 20 // Write progress record
+	MethodIDWriteVerboseLine              MethodID = 21 // Write verbose output
+	MethodIDWriteWarningLine              MethodID = 22 // Write warning output
+	MethodIDPrompt                        MethodID = 23 // Prompt user with fields
+	MethodIDPromptForCredential1          MethodID = 24 // PromptForCredential(caption, message, userName, targetName)
+	MethodIDPromptForCredential2          MethodID = 25 // PromptForCredential(caption, message, userName, targetName, allowedCredentialTypes, options)
+	MethodIDPromptForChoice               MethodID = 26 // Prompt user to choose from options
+)
+
+// PSHostRawUserInterface methods (27-51)
+const (
+	MethodIDGetForegroundColor       MethodID = 27 // Get console foreground color
+	MethodIDSetForegroundColor       MethodID = 28 // Set console foreground color
+	MethodIDGetBackgroundColor       MethodID = 29 // Get console background color
+	MethodIDSetBackgroundColor       MethodID = 30 // Set console background color
+	MethodIDGetCursorPosition        MethodID = 31 // Get cursor position
+	MethodIDSetCursorPosition        MethodID = 32 // Set cursor position
+	MethodIDGetWindowPosition        MethodID = 33 // Get window position
+	MethodIDSetWindowPosition        MethodID = 34 // Set window position
+	MethodIDGetCursorSize            MethodID = 35 // Get cursor size
+	MethodIDSetCursorSize            MethodID = 36 // Set cursor size
+	MethodIDGetBufferSize            MethodID = 37 // Get buffer size
+	MethodIDSetBufferSize            MethodID = 38 // Set buffer size
+	MethodIDGetWindowSize            MethodID = 39 // Get window size
+	MethodIDSetWindowSize            MethodID = 40 // Set window size
+	MethodIDGetWindowTitle           MethodID = 41 // Get window title
+	MethodIDSetWindowTitle           MethodID = 42 // Set window title
+	MethodIDGetMaxWindowSize         MethodID = 43 // Get maximum window size
+	MethodIDGetMaxPhysicalWindowSize MethodID = 44 // Get maximum physical window size
+	MethodIDGetKeyAvailable          MethodID = 45 // Check if key is available
+	MethodIDReadKey                  MethodID = 46 // Read a key press
+	MethodIDFlushInputBuffer         MethodID = 47 // Flush input buffer
+	MethodIDSetBufferContents1       MethodID = 48 // Set buffer contents (single rectangle)
+	MethodIDSetBufferContents2       MethodID = 49 // Set buffer contents (with coordinates)
+	MethodIDGetBufferContents        MethodID = 50 // Get buffer contents
+	MethodIDScrollBufferContents     MethodID = 51 // Scroll buffer contents
+)
+
+// Runspace push/pop methods (52-55)
+const (
+	MethodIDPushRunspace        MethodID = 52 // Push runspace onto stack
+	MethodIDPopRunspace         MethodID = 53 // Pop runspace from stack
+	MethodIDGetIsRunspacePushed MethodID = 54 // Check if runspace is pushed
+	MethodIDGetRunspace         MethodID = 55 // Get current runspace
+)
+
+// Additional PSHostUserInterface methods (56)
+const (
+	MethodIDPromptForChoiceMultipleSelection MethodID = 56 // Prompt for multiple choices
 )
 
 // String returns the string representation of a method ID.
 func (m MethodID) String() string {
 	switch m {
-	case MethodIDRead:
-		return "Read"
+	// PSHost methods (1-8)
+	case MethodIDGetName:
+		return "GetName"
+	case MethodIDGetVersion:
+		return "GetVersion"
+	case MethodIDGetInstanceId:
+		return "GetInstanceId"
+	case MethodIDGetCurrentCulture:
+		return "GetCurrentCulture"
+	case MethodIDGetCurrentUICulture:
+		return "GetCurrentUICulture"
+	case MethodIDSetShouldExit:
+		return "SetShouldExit"
+	case MethodIDEnterNestedPrompt:
+		return "EnterNestedPrompt"
+	case MethodIDExitNestedPrompt:
+		return "ExitNestedPrompt"
+
+	// Application notification methods (9-10)
+	case MethodIDNotifyBeginApplication:
+		return "NotifyBeginApplication"
+	case MethodIDNotifyEndApplication:
+		return "NotifyEndApplication"
+
+	// PSHostUserInterface methods (11-26)
 	case MethodIDReadLine:
 		return "ReadLine"
+	case MethodIDReadLineAsSecureString:
+		return "ReadLineAsSecureString"
+	case MethodIDWrite1:
+		return "Write1"
+	case MethodIDWrite2:
+		return "Write2"
+	case MethodIDWriteLine1:
+		return "WriteLine1"
+	case MethodIDWriteLine2:
+		return "WriteLine2"
+	case MethodIDWriteLine3:
+		return "WriteLine3"
 	case MethodIDWriteErrorLine:
 		return "WriteErrorLine"
-	case MethodIDWrite:
-		return "Write"
 	case MethodIDWriteDebugLine:
 		return "WriteDebugLine"
+	case MethodIDWriteProgress:
+		return "WriteProgress"
 	case MethodIDWriteVerboseLine:
 		return "WriteVerboseLine"
 	case MethodIDWriteWarningLine:
 		return "WriteWarningLine"
-	case MethodIDWriteInformation:
-		return "WriteInformation"
 	case MethodIDPrompt:
 		return "Prompt"
-	case MethodIDPromptForCredential:
-		return "PromptForCredential"
+	case MethodIDPromptForCredential1:
+		return "PromptForCredential1"
+	case MethodIDPromptForCredential2:
+		return "PromptForCredential2"
 	case MethodIDPromptForChoice:
 		return "PromptForChoice"
-	case MethodIDPromptForPassword:
-		return "PromptForPassword"
+
+	// RawUI methods (27-51)
+	case MethodIDGetForegroundColor:
+		return "GetForegroundColor"
+	case MethodIDSetForegroundColor:
+		return "SetForegroundColor"
+	case MethodIDGetBackgroundColor:
+		return "GetBackgroundColor"
+	case MethodIDSetBackgroundColor:
+		return "SetBackgroundColor"
+	case MethodIDGetCursorPosition:
+		return "GetCursorPosition"
+	case MethodIDSetCursorPosition:
+		return "SetCursorPosition"
+	case MethodIDGetWindowPosition:
+		return "GetWindowPosition"
+	case MethodIDSetWindowPosition:
+		return "SetWindowPosition"
+	case MethodIDGetCursorSize:
+		return "GetCursorSize"
+	case MethodIDSetCursorSize:
+		return "SetCursorSize"
+	case MethodIDGetBufferSize:
+		return "GetBufferSize"
+	case MethodIDSetBufferSize:
+		return "SetBufferSize"
+	case MethodIDGetWindowSize:
+		return "GetWindowSize"
+	case MethodIDSetWindowSize:
+		return "SetWindowSize"
+	case MethodIDGetWindowTitle:
+		return "GetWindowTitle"
+	case MethodIDSetWindowTitle:
+		return "SetWindowTitle"
+	case MethodIDGetMaxWindowSize:
+		return "GetMaxWindowSize"
+	case MethodIDGetMaxPhysicalWindowSize:
+		return "GetMaxPhysicalWindowSize"
+	case MethodIDGetKeyAvailable:
+		return "GetKeyAvailable"
+	case MethodIDReadKey:
+		return "ReadKey"
+	case MethodIDFlushInputBuffer:
+		return "FlushInputBuffer"
+	case MethodIDSetBufferContents1:
+		return "SetBufferContents1"
+	case MethodIDSetBufferContents2:
+		return "SetBufferContents2"
+	case MethodIDGetBufferContents:
+		return "GetBufferContents"
+	case MethodIDScrollBufferContents:
+		return "ScrollBufferContents"
+
+	// Runspace methods (52-55)
+	case MethodIDPushRunspace:
+		return "PushRunspace"
+	case MethodIDPopRunspace:
+		return "PopRunspace"
+	case MethodIDGetIsRunspacePushed:
+		return "GetIsRunspacePushed"
+	case MethodIDGetRunspace:
+		return "GetRunspace"
+
+	// Additional methods (56)
+	case MethodIDPromptForChoiceMultipleSelection:
+		return "PromptForChoiceMultipleSelection"
+
 	default:
 		return fmt.Sprintf("Unknown(%d)", m)
 	}
@@ -98,26 +263,103 @@ func (h *CallbackHandler) HandleCall(call *RemoteHostCall) *RemoteHostResponse {
 	// Dispatch to appropriate method
 	var err error
 	switch call.MethodID {
+	// PSHost methods (1-8)
+	case MethodIDGetName:
+		response.ReturnValue, err = h.handleGetName(call)
+	case MethodIDGetVersion:
+		response.ReturnValue, err = h.handleGetVersion(call)
+	case MethodIDGetInstanceId:
+		response.ReturnValue, err = h.handleGetInstanceId(call)
+	case MethodIDGetCurrentCulture:
+		response.ReturnValue, err = h.handleGetCurrentCulture(call)
+	case MethodIDGetCurrentUICulture:
+		response.ReturnValue, err = h.handleGetCurrentUICulture(call)
+	case MethodIDSetShouldExit:
+		err = h.handleSetShouldExit(call)
+	case MethodIDEnterNestedPrompt:
+		err = h.handleEnterNestedPrompt(call)
+	case MethodIDExitNestedPrompt:
+		err = h.handleExitNestedPrompt(call)
+
+	// Application notification methods (9-10)
+	case MethodIDNotifyBeginApplication:
+		err = h.handleNotifyBeginApplication(call)
+	case MethodIDNotifyEndApplication:
+		err = h.handleNotifyEndApplication(call)
+
+	// PSHostUserInterface methods (11-26)
 	case MethodIDReadLine:
 		response.ReturnValue, err = h.handleReadLine(call)
+	case MethodIDReadLineAsSecureString:
+		response.ReturnValue, err = h.handleReadLineAsSecureString(call)
+	case MethodIDWrite1:
+		err = h.handleWrite1(call)
+	case MethodIDWrite2:
+		err = h.handleWrite2(call)
+	case MethodIDWriteLine1:
+		err = h.handleWriteLine1(call)
+	case MethodIDWriteLine2:
+		err = h.handleWriteLine2(call)
+	case MethodIDWriteLine3:
+		err = h.handleWriteLine3(call)
 	case MethodIDWriteErrorLine:
 		err = h.handleWriteErrorLine(call)
-	case MethodIDWrite:
-		err = h.handleWrite(call)
 	case MethodIDWriteDebugLine:
 		err = h.handleWriteDebugLine(call)
+	case MethodIDWriteProgress:
+		err = h.handleWriteProgress(call)
 	case MethodIDWriteVerboseLine:
 		err = h.handleWriteVerboseLine(call)
 	case MethodIDWriteWarningLine:
 		err = h.handleWriteWarningLine(call)
 	case MethodIDPrompt:
 		response.ReturnValue, err = h.handlePrompt(call)
-	case MethodIDPromptForCredential:
-		response.ReturnValue, err = h.handlePromptForCredential(call)
+	case MethodIDPromptForCredential1:
+		response.ReturnValue, err = h.handlePromptForCredential1(call)
+	case MethodIDPromptForCredential2:
+		response.ReturnValue, err = h.handlePromptForCredential2(call)
 	case MethodIDPromptForChoice:
 		response.ReturnValue, err = h.handlePromptForChoice(call)
-	case MethodIDPromptForPassword:
-		response.ReturnValue, err = h.handlePromptForPassword(call)
+
+	// RawUI methods (27-51) - Return unsupported for now
+	case MethodIDGetForegroundColor,
+		MethodIDSetForegroundColor,
+		MethodIDGetBackgroundColor,
+		MethodIDSetBackgroundColor,
+		MethodIDGetCursorPosition,
+		MethodIDSetCursorPosition,
+		MethodIDGetWindowPosition,
+		MethodIDSetWindowPosition,
+		MethodIDGetCursorSize,
+		MethodIDSetCursorSize,
+		MethodIDGetBufferSize,
+		MethodIDSetBufferSize,
+		MethodIDGetWindowSize,
+		MethodIDSetWindowSize,
+		MethodIDGetWindowTitle,
+		MethodIDSetWindowTitle,
+		MethodIDGetMaxWindowSize,
+		MethodIDGetMaxPhysicalWindowSize,
+		MethodIDGetKeyAvailable,
+		MethodIDReadKey,
+		MethodIDFlushInputBuffer,
+		MethodIDSetBufferContents1,
+		MethodIDSetBufferContents2,
+		MethodIDGetBufferContents,
+		MethodIDScrollBufferContents:
+		err = fmt.Errorf("RawUI method %s not implemented", call.MethodID)
+
+	// Runspace methods (52-55) - Return unsupported for now
+	case MethodIDPushRunspace,
+		MethodIDPopRunspace,
+		MethodIDGetIsRunspacePushed,
+		MethodIDGetRunspace:
+		err = fmt.Errorf("Runspace method %s not implemented", call.MethodID)
+
+	// Additional methods (56)
+	case MethodIDPromptForChoiceMultipleSelection:
+		response.ReturnValue, err = h.handlePromptForChoiceMultipleSelection(call)
+
 	default:
 		err = fmt.Errorf("unsupported host method ID: %d", call.MethodID)
 	}
@@ -254,6 +496,107 @@ func convertToChoiceDescription(obj interface{}) (ChoiceDescription, error) {
 	return cd, nil
 }
 
+// ========== PSHost Method Handlers (1-8) ==========
+
+// handleGetName processes GetName method calls.
+// Parameters: none
+// Returns: string
+func (h *CallbackHandler) handleGetName(call *RemoteHostCall) (interface{}, error) {
+	if h.host == nil {
+		return "", nil
+	}
+	return h.host.GetName(), nil
+}
+
+// handleGetVersion processes GetVersion method calls.
+// Parameters: none
+// Returns: Version object
+func (h *CallbackHandler) handleGetVersion(call *RemoteHostCall) (interface{}, error) {
+	if h.host == nil {
+		return Version{}, nil
+	}
+	return h.host.GetVersion(), nil
+}
+
+// handleGetInstanceId processes GetInstanceId method calls.
+// Parameters: none
+// Returns: string (GUID)
+func (h *CallbackHandler) handleGetInstanceId(call *RemoteHostCall) (interface{}, error) {
+	if h.host == nil {
+		return "00000000-0000-0000-0000-000000000000", nil
+	}
+	return h.host.GetInstanceId(), nil
+}
+
+// handleGetCurrentCulture processes GetCurrentCulture method calls.
+// Parameters: none
+// Returns: string (e.g., "en-US")
+func (h *CallbackHandler) handleGetCurrentCulture(call *RemoteHostCall) (interface{}, error) {
+	if h.host == nil {
+		return "en-US", nil
+	}
+	return h.host.GetCurrentCulture(), nil
+}
+
+// handleGetCurrentUICulture processes GetCurrentUICulture method calls.
+// Parameters: none
+// Returns: string (e.g., "en-US")
+func (h *CallbackHandler) handleGetCurrentUICulture(call *RemoteHostCall) (interface{}, error) {
+	if h.host == nil {
+		return "en-US", nil
+	}
+	return h.host.GetCurrentUICulture(), nil
+}
+
+// handleSetShouldExit processes SetShouldExit method calls.
+// Parameters: [0] int32 (exit code)
+// Returns: none
+func (h *CallbackHandler) handleSetShouldExit(call *RemoteHostCall) error {
+	// This is a signal to the host that PowerShell wants to exit
+	// We don't implement this in the basic host, but advanced hosts could handle it
+	return nil
+}
+
+// handleEnterNestedPrompt processes EnterNestedPrompt method calls.
+// Parameters: none
+// Returns: none
+func (h *CallbackHandler) handleEnterNestedPrompt(call *RemoteHostCall) error {
+	// Nested prompts are for interactive debugging scenarios
+	// Not implemented in basic host
+	return fmt.Errorf("EnterNestedPrompt not supported")
+}
+
+// handleExitNestedPrompt processes ExitNestedPrompt method calls.
+// Parameters: none
+// Returns: none
+func (h *CallbackHandler) handleExitNestedPrompt(call *RemoteHostCall) error {
+	// Nested prompts are for interactive debugging scenarios
+	// Not implemented in basic host
+	return fmt.Errorf("ExitNestedPrompt not supported")
+}
+
+// ========== Application Notification Handlers (9-10) ==========
+
+// handleNotifyBeginApplication processes NotifyBeginApplication method calls.
+// Parameters: none
+// Returns: none
+func (h *CallbackHandler) handleNotifyBeginApplication(call *RemoteHostCall) error {
+	// Notification that an external application is starting
+	// Most hosts can ignore this
+	return nil
+}
+
+// handleNotifyEndApplication processes NotifyEndApplication method calls.
+// Parameters: none
+// Returns: none
+func (h *CallbackHandler) handleNotifyEndApplication(call *RemoteHostCall) error {
+	// Notification that an external application has ended
+	// Most hosts can ignore this
+	return nil
+}
+
+// ========== PSHostUserInterface Method Handlers (11-26) ==========
+
 // handleReadLine processes ReadLine method calls.
 // Parameters: none
 // Returns: string
@@ -262,6 +605,97 @@ func (h *CallbackHandler) handleReadLine(call *RemoteHostCall) (interface{}, err
 		return "", nil
 	}
 	return h.host.UI().ReadLine()
+}
+
+// handleReadLineAsSecureString processes ReadLineAsSecureString method calls.
+// Parameters: none
+// Returns: *objects.SecureString
+func (h *CallbackHandler) handleReadLineAsSecureString(call *RemoteHostCall) (interface{}, error) {
+	if h.host == nil || h.host.UI() == nil {
+		return objects.NewSecureString("")
+	}
+	return h.host.UI().ReadLineAsSecureString()
+}
+
+// handleWrite1 processes Write1 method calls.
+// Parameters: [0] string (value)
+// Returns: none
+func (h *CallbackHandler) handleWrite1(call *RemoteHostCall) error {
+	if len(call.MethodParameters) < 1 {
+		return fmt.Errorf("Write1 requires 1 parameter, got %d", len(call.MethodParameters))
+	}
+	text, ok := call.MethodParameters[0].(string)
+	if !ok {
+		return fmt.Errorf("Write1 parameter must be string, got %T", call.MethodParameters[0])
+	}
+	if h.host != nil && h.host.UI() != nil {
+		h.host.UI().Write(text)
+	}
+	return nil
+}
+
+// handleWrite2 processes Write2 method calls.
+// Parameters: [0] ConsoleColor (foreground), [1] ConsoleColor (background), [2] string (value)
+// Returns: none
+func (h *CallbackHandler) handleWrite2(call *RemoteHostCall) error {
+	if len(call.MethodParameters) < 3 {
+		return fmt.Errorf("Write2 requires 3 parameters, got %d", len(call.MethodParameters))
+	}
+	// For now, we ignore the color parameters and just write the text
+	// A more advanced implementation could handle console colors
+	text, ok := call.MethodParameters[2].(string)
+	if !ok {
+		return fmt.Errorf("Write2 text parameter must be string, got %T", call.MethodParameters[2])
+	}
+	if h.host != nil && h.host.UI() != nil {
+		h.host.UI().Write(text)
+	}
+	return nil
+}
+
+// handleWriteLine1 processes WriteLine1 method calls.
+// Parameters: none
+// Returns: none
+func (h *CallbackHandler) handleWriteLine1(call *RemoteHostCall) error {
+	if h.host != nil && h.host.UI() != nil {
+		h.host.UI().WriteLine("")
+	}
+	return nil
+}
+
+// handleWriteLine2 processes WriteLine2 method calls.
+// Parameters: [0] string (value)
+// Returns: none
+func (h *CallbackHandler) handleWriteLine2(call *RemoteHostCall) error {
+	if len(call.MethodParameters) < 1 {
+		return fmt.Errorf("WriteLine2 requires 1 parameter, got %d", len(call.MethodParameters))
+	}
+	text, ok := call.MethodParameters[0].(string)
+	if !ok {
+		return fmt.Errorf("WriteLine2 parameter must be string, got %T", call.MethodParameters[0])
+	}
+	if h.host != nil && h.host.UI() != nil {
+		h.host.UI().WriteLine(text)
+	}
+	return nil
+}
+
+// handleWriteLine3 processes WriteLine3 method calls.
+// Parameters: [0] ConsoleColor (foreground), [1] ConsoleColor (background), [2] string (value)
+// Returns: none
+func (h *CallbackHandler) handleWriteLine3(call *RemoteHostCall) error {
+	if len(call.MethodParameters) < 3 {
+		return fmt.Errorf("WriteLine3 requires 3 parameters, got %d", len(call.MethodParameters))
+	}
+	// For now, we ignore the color parameters and just write the text
+	text, ok := call.MethodParameters[2].(string)
+	if !ok {
+		return fmt.Errorf("WriteLine3 text parameter must be string, got %T", call.MethodParameters[2])
+	}
+	if h.host != nil && h.host.UI() != nil {
+		h.host.UI().WriteLine(text)
+	}
+	return nil
 }
 
 // handleWriteErrorLine processes WriteErrorLine method calls.
@@ -281,23 +715,6 @@ func (h *CallbackHandler) handleWriteErrorLine(call *RemoteHostCall) error {
 	return nil
 }
 
-// handleWrite processes Write method calls.
-// Parameters: [0] string (text)
-// Returns: none
-func (h *CallbackHandler) handleWrite(call *RemoteHostCall) error {
-	if len(call.MethodParameters) < 1 {
-		return fmt.Errorf("Write requires 1 parameter, got %d", len(call.MethodParameters))
-	}
-	text, ok := call.MethodParameters[0].(string)
-	if !ok {
-		return fmt.Errorf("Write parameter must be string, got %T", call.MethodParameters[0])
-	}
-	if h.host != nil && h.host.UI() != nil {
-		h.host.UI().Write(text)
-	}
-	return nil
-}
-
 // handleWriteDebugLine processes WriteDebugLine method calls.
 // Parameters: [0] string (message)
 // Returns: none
@@ -311,6 +728,37 @@ func (h *CallbackHandler) handleWriteDebugLine(call *RemoteHostCall) error {
 	}
 	if h.host != nil && h.host.UI() != nil {
 		h.host.UI().WriteDebugLine(message)
+	}
+	return nil
+}
+
+// handleWriteProgress processes WriteProgress method calls.
+// Parameters: [0] int64 (sourceId), [1] ProgressRecord
+// Returns: none
+func (h *CallbackHandler) handleWriteProgress(call *RemoteHostCall) error {
+	if len(call.MethodParameters) < 2 {
+		return fmt.Errorf("WriteProgress requires 2 parameters, got %d", len(call.MethodParameters))
+	}
+
+	var sourceId int64
+	switch v := call.MethodParameters[0].(type) {
+	case int:
+		sourceId = int64(v)
+	case int32:
+		sourceId = int64(v)
+	case int64:
+		sourceId = v
+	default:
+		return fmt.Errorf("WriteProgress sourceId must be int, got %T", call.MethodParameters[0])
+	}
+
+	// For now, accept any type for the progress record parameter
+	// A more complete implementation would deserialize the ProgressRecord
+	// from the PSObject parameter
+	if h.host != nil && h.host.UI() != nil {
+		// Call with nil record for now - implementing full ProgressRecord deserialization
+		// is complex and can be done later if needed
+		h.host.UI().WriteProgress(sourceId, nil)
 	}
 	return nil
 }
@@ -379,38 +827,97 @@ func (h *CallbackHandler) handlePrompt(call *RemoteHostCall) (interface{}, error
 	return h.host.UI().Prompt(caption, message, descriptions)
 }
 
-// handlePromptForCredential processes PromptForCredential method calls.
+// handlePromptForCredential1 processes PromptForCredential1 method calls.
 // Parameters: [0] string (caption), [1] string (message), [2] string (userName), [3] string (targetName)
 // Returns: *objects.PSCredential
-func (h *CallbackHandler) handlePromptForCredential(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handlePromptForCredential1(call *RemoteHostCall) (interface{}, error) {
 	if len(call.MethodParameters) < 4 {
-		return nil, fmt.Errorf("PromptForCredential requires 4 parameters, got %d", len(call.MethodParameters))
+		return nil, fmt.Errorf("PromptForCredential1 requires 4 parameters, got %d", len(call.MethodParameters))
 	}
 
 	caption, ok := call.MethodParameters[0].(string)
 	if !ok {
-		return nil, fmt.Errorf("PromptForCredential caption must be string, got %T", call.MethodParameters[0])
+		return nil, fmt.Errorf("PromptForCredential1 caption must be string, got %T", call.MethodParameters[0])
 	}
 
 	message, ok := call.MethodParameters[1].(string)
 	if !ok {
-		return nil, fmt.Errorf("PromptForCredential message must be string, got %T", call.MethodParameters[1])
+		return nil, fmt.Errorf("PromptForCredential1 message must be string, got %T", call.MethodParameters[1])
 	}
 
 	userName, ok := call.MethodParameters[2].(string)
 	if !ok {
-		return nil, fmt.Errorf("PromptForCredential userName must be string, got %T", call.MethodParameters[2])
+		return nil, fmt.Errorf("PromptForCredential1 userName must be string, got %T", call.MethodParameters[2])
 	}
 
 	targetName, ok := call.MethodParameters[3].(string)
 	if !ok {
-		return nil, fmt.Errorf("PromptForCredential targetName must be string, got %T", call.MethodParameters[3])
+		return nil, fmt.Errorf("PromptForCredential1 targetName must be string, got %T", call.MethodParameters[3])
 	}
 
 	if h.host == nil || h.host.UI() == nil {
 		return nil, nil
 	}
 	return h.host.UI().PromptForCredential(caption, message, userName, targetName, CredentialTypeDefault, CredentialUIOptionNone)
+}
+
+// handlePromptForCredential2 processes PromptForCredential2 method calls.
+// Parameters: [0] string (caption), [1] string (message), [2] string (userName), [3] string (targetName),
+//             [4] CredentialTypes (allowedCredentialTypes), [5] CredentialUIOptions (options)
+// Returns: *objects.PSCredential
+func (h *CallbackHandler) handlePromptForCredential2(call *RemoteHostCall) (interface{}, error) {
+	if len(call.MethodParameters) < 6 {
+		return nil, fmt.Errorf("PromptForCredential2 requires 6 parameters, got %d", len(call.MethodParameters))
+	}
+
+	caption, ok := call.MethodParameters[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("PromptForCredential2 caption must be string, got %T", call.MethodParameters[0])
+	}
+
+	message, ok := call.MethodParameters[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("PromptForCredential2 message must be string, got %T", call.MethodParameters[1])
+	}
+
+	userName, ok := call.MethodParameters[2].(string)
+	if !ok {
+		return nil, fmt.Errorf("PromptForCredential2 userName must be string, got %T", call.MethodParameters[2])
+	}
+
+	targetName, ok := call.MethodParameters[3].(string)
+	if !ok {
+		return nil, fmt.Errorf("PromptForCredential2 targetName must be string, got %T", call.MethodParameters[3])
+	}
+
+	var allowedCredentialTypes CredentialTypes
+	switch v := call.MethodParameters[4].(type) {
+	case int:
+		allowedCredentialTypes = CredentialTypes(v)
+	case int32:
+		allowedCredentialTypes = CredentialTypes(v)
+	case int64:
+		allowedCredentialTypes = CredentialTypes(v)
+	default:
+		allowedCredentialTypes = CredentialTypeDefault
+	}
+
+	var options CredentialUIOptions
+	switch v := call.MethodParameters[5].(type) {
+	case int:
+		options = CredentialUIOptions(v)
+	case int32:
+		options = CredentialUIOptions(v)
+	case int64:
+		options = CredentialUIOptions(v)
+	default:
+		options = CredentialUIOptionNone
+	}
+
+	if h.host == nil || h.host.UI() == nil {
+		return nil, nil
+	}
+	return h.host.UI().PromptForCredential(caption, message, userName, targetName, allowedCredentialTypes, options)
 }
 
 // handlePromptForChoice processes PromptForChoice method calls.
@@ -455,13 +962,43 @@ func (h *CallbackHandler) handlePromptForChoice(call *RemoteHostCall) (interface
 	return h.host.UI().PromptForChoice(caption, message, choices, defaultChoice)
 }
 
-// handlePromptForPassword processes PromptForPassword method calls.
-// Parameters: [0] string (caption), [1] string (message)
-// Returns: *objects.SecureString
-func (h *CallbackHandler) handlePromptForPassword(call *RemoteHostCall) (interface{}, error) {
-	// PromptForPassword is typically implemented as ReadLineAsSecureString
-	if h.host == nil || h.host.UI() == nil {
-		return objects.NewSecureString("")
+// handlePromptForChoiceMultipleSelection processes PromptForChoiceMultipleSelection method calls.
+// Parameters: [0] string (caption), [1] string (message), [2] []ChoiceDescription, [3] []int (defaultChoices)
+// Returns: []int (selected choice indices)
+func (h *CallbackHandler) handlePromptForChoiceMultipleSelection(call *RemoteHostCall) (interface{}, error) {
+	if len(call.MethodParameters) < 4 {
+		return nil, fmt.Errorf("PromptForChoiceMultipleSelection requires 4 parameters, got %d", len(call.MethodParameters))
 	}
-	return h.host.UI().ReadLineAsSecureString()
+
+	_, ok := call.MethodParameters[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("PromptForChoiceMultipleSelection caption must be string, got %T", call.MethodParameters[0])
+	}
+
+	_, ok = call.MethodParameters[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("PromptForChoiceMultipleSelection message must be string, got %T", call.MethodParameters[1])
+	}
+
+	// Convert parameter 2 to []ChoiceDescription
+	_, err := convertToChoiceDescriptions(call.MethodParameters[2])
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert choice descriptions: %w", err)
+	}
+
+	// For now, return empty array - implementing multi-select is complex
+	// and not commonly used in practice. Parameters are validated but not used.
+	if h.host == nil || h.host.UI() == nil {
+		return []int{}, nil
+	}
+
+	// Default behavior: return first choice from default choices if available
+	// A more complete implementation would support multi-select
+	if defaultChoices, ok := call.MethodParameters[3].([]interface{}); ok && len(defaultChoices) > 0 {
+		if firstChoice, ok := defaultChoices[0].(int); ok {
+			return []int{firstChoice}, nil
+		}
+	}
+
+	return []int{}, nil
 }

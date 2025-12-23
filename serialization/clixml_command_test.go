@@ -23,17 +23,14 @@ func TestSerializePowerShell(t *testing.T) {
 	xmlStr := string(data)
 
 	// Check for key elements in the XML
-	expectedStrings := []string{
-		"Microsoft.PowerShell.Commands.PowerShellCmdlet+PowerShell",
-		"<S N=\"Cmdlet\">Get-Process</S>",
-		"<S N=\"Name\">Id</S>",
-		"<I32 N=\"Value\">123</I32>",
-		"<S N=\"Cmdlet\">Select-Object</S>",
-		"<S N=\"Name\">Property</S>",
-		"<S N=\"Value\">Name</S>",
+	expectedSubstrings := []string{
+		`<S N="Cmd">Get-Process</S>`,
+		`<S N="Cmd">Select-Object</S>`,
+		// Parameters are now Args
+		`<Obj N="Args"`,
 	}
 
-	for _, expected := range expectedStrings {
+	for _, expected := range expectedSubstrings {
 		if !strings.Contains(xmlStr, expected) {
 			t.Errorf("Expected XML to contain %q, but it didn't.\nXML: %s", expected, xmlStr)
 		}

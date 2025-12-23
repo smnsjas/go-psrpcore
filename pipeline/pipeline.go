@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/smnsjas/go-psrpcore/host"
@@ -16,6 +17,14 @@ import (
 var (
 	// ErrInvalidState is returned when an operation is attempted in an invalid state.
 	ErrInvalidState = errors.New("invalid pipeline state")
+	// ErrBufferFull is returned when a channel buffer is full and a message cannot be delivered within the timeout.
+	ErrBufferFull = errors.New("channel buffer full, message delivery timed out")
+)
+
+const (
+	// DefaultChannelTimeout is the default timeout for channel send operations when buffer is full.
+	// This provides back-pressure to prevent unbounded memory growth while avoiding deadlocks.
+	DefaultChannelTimeout = 5 * time.Second
 )
 
 // State represents the current state of a Pipeline.
@@ -23,17 +32,26 @@ type State int
 
 const (
 	// StateNotStarted indicates the pipeline has not been invoked yet.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 0.
 	StateNotStarted State = iota
 	// StateRunning indicates the pipeline is currently executing.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 1.
 	StateRunning
 	// StateStopping indicates the pipeline is in the process of stopping.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 2.
 	StateStopping
 	// StateStopped indicates the pipeline has been stopped.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 3.
 	StateStopped
 	// StateCompleted indicates the pipeline completed successfully.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 4.
 	StateCompleted
 	// StateFailed indicates the pipeline failed with an error.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 5.
 	StateFailed
+	// StateDisconnected indicates the pipeline is in disconnected state.
+	// MS-PSRP Section 2.2.3.9: PSInvocationState value 6.
+	StateDisconnected
 )
 
 // String returns a string representation of the state.
@@ -51,6 +69,8 @@ func (s State) String() string {
 		return "Completed"
 	case StateFailed:
 		return "Failed"
+	case StateDisconnected:
+		return "Disconnected"
 	default:
 		return fmt.Sprintf("Unknown(%d)", s)
 	}
@@ -86,27 +106,31 @@ type Pipeline struct {
 	// Lifecycle management
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// channelTimeout is the timeout for channel send operations when buffer is full.
+	channelTimeout time.Duration
 }
 
 // New creates a new Pipeline attached to the given transport.
 // command can be a raw script, which will be wrapped in a PowerShell object.
 func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 	ps := objects.NewPowerShell()
-	// Default to treating input as a script
-	ps.AddCommand(command, true)
+	// Default to false (cmdlet), not true (script)
+	ps.AddCommand(command, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Pipeline{
-		id:         uuid.New(),
-		runspaceID: runspaceID,
-		state:      StateNotStarted,
-		transport:  transport,
-		powerShell: ps,
-		outputCh:   make(chan *messages.Message, 100), // Buffered to prevent blocking
-		errorCh:    make(chan *messages.Message, 100),
-		doneCh:     make(chan struct{}),
-		ctx:        ctx,
-		cancel:     cancel,
+		id:             uuid.New(),
+		runspaceID:     runspaceID,
+		state:          StateNotStarted,
+		transport:      transport,
+		powerShell:     ps,
+		outputCh:       make(chan *messages.Message, 100), // Buffered to prevent blocking
+		errorCh:        make(chan *messages.Message, 100),
+		doneCh:         make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
+		channelTimeout: DefaultChannelTimeout,
 	}
 }
 
@@ -115,16 +139,17 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Pipeline{
-		id:         uuid.New(),
-		runspaceID: runspaceID,
-		state:      StateNotStarted,
-		transport:  transport,
-		powerShell: objects.NewPowerShell(),
-		outputCh:   make(chan *messages.Message, 100),
-		errorCh:    make(chan *messages.Message, 100),
-		doneCh:     make(chan struct{}),
-		ctx:        ctx,
-		cancel:     cancel,
+		id:             uuid.New(),
+		runspaceID:     runspaceID,
+		state:          StateNotStarted,
+		transport:      transport,
+		powerShell:     objects.NewPowerShell(),
+		outputCh:       make(chan *messages.Message, 100),
+		errorCh:        make(chan *messages.Message, 100),
+		doneCh:         make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
+		channelTimeout: DefaultChannelTimeout,
 	}
 }
 
@@ -154,6 +179,16 @@ func (p *Pipeline) AddArgument(value interface{}) *Pipeline {
 	return p.AddParameter("", value)
 }
 
+// SetChannelTimeout sets the timeout for channel send operations when buffers are full.
+// The default is DefaultChannelTimeout (5 seconds).
+// Setting a longer timeout allows for slower consumers, while a shorter timeout provides faster failure detection.
+func (p *Pipeline) SetChannelTimeout(timeout time.Duration) *Pipeline {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.channelTimeout = timeout
+	return p
+}
+
 // ID returns the unique identifier of the pipeline.
 func (p *Pipeline) ID() uuid.UUID {
 	return p.id
@@ -180,7 +215,7 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 	// Serialize the PowerShell object to CLIXML
 	serializer := serialization.NewSerializer()
 	defer serializer.Close()
-	cmdData, err := serializer.Serialize(p.powerShell)
+	cmdData, err := serializer.SerializeRaw(p.powerShell)
 	if err != nil {
 		p.transition(StateFailed, err)
 		return fmt.Errorf("serialize command: %w", err)
@@ -226,7 +261,7 @@ func (p *Pipeline) SendInput(ctx context.Context, data interface{}) error {
 
 	serializer := serialization.NewSerializer()
 	defer serializer.Close()
-	xmlData, err := serializer.Serialize(data)
+	xmlData, err := serializer.SerializeRaw(data)
 	if err != nil {
 		return fmt.Errorf("serialize input: %w", err)
 	}
@@ -276,22 +311,54 @@ func (p *Pipeline) Wait() error {
 }
 
 // HandleMessage processes an incoming message destined for this pipeline.
+// Messages are delivered to buffered channels with timeout-based back-pressure.
+// If a channel buffer is full, this method will block for up to channelTimeout
+// before returning ErrBufferFull. This prevents unbounded memory growth while
+// avoiding deadlocks with slow consumers.
 func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 	switch msg.Type {
 	case messages.MessageTypePipelineOutput:
+		// Try immediate send first (fast path)
 		select {
 		case p.outputCh <- msg:
+			return nil
 		default:
-			// Buffer full, drop or block? For now drop to avoid deadlock if reader is slow
-			// In production, this should probably block or have unlimited buffer
-			return fmt.Errorf("output buffer full")
+		}
+
+		// Buffer full - block with timeout for back-pressure
+		p.mu.RLock()
+		timeout := p.channelTimeout
+		p.mu.RUnlock()
+
+		select {
+		case p.outputCh <- msg:
+			return nil
+		case <-time.After(timeout):
+			return fmt.Errorf("%w: output channel timeout after %v", ErrBufferFull, timeout)
+		case <-p.ctx.Done():
+			return p.ctx.Err()
 		}
 
 	case messages.MessageTypeErrorRecord:
+		// Try immediate send first (fast path)
 		select {
 		case p.errorCh <- msg:
+			return nil
 		default:
-			return fmt.Errorf("error buffer full")
+		}
+
+		// Buffer full - block with timeout for back-pressure
+		p.mu.RLock()
+		timeout := p.channelTimeout
+		p.mu.RUnlock()
+
+		select {
+		case p.errorCh <- msg:
+			return nil
+		case <-time.After(timeout):
+			return fmt.Errorf("%w: error channel timeout after %v", ErrBufferFull, timeout)
+		case <-p.ctx.Done():
+			return p.ctx.Err()
 		}
 
 	case messages.MessageTypePipelineState:
@@ -309,21 +376,28 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 			return nil
 		}
 
+		// MS-PSRP Section 2.2.3.9 - PSInvocationState enum values
 		switch stateVal {
-		case 2: // Running
+		case 0: // NotStarted
+			p.mu.Lock()
+			p.state = StateNotStarted
+			p.mu.Unlock()
+		case 1: // Running
 			p.mu.Lock()
 			p.state = StateRunning
 			p.mu.Unlock()
-		case 3: // Stopping
+		case 2: // Stopping
 			p.mu.Lock()
 			p.state = StateStopping
 			p.mu.Unlock()
+		case 3: // Stopped
+			p.transition(StateStopped, nil)
 		case 4: // Completed
 			p.transition(StateCompleted, nil)
 		case 5: // Failed
 			p.transition(StateFailed, fmt.Errorf("pipeline failed on server"))
-		case 6: // Stopped
-			p.transition(StateStopped, nil)
+		case 6: // Disconnected
+			p.transition(StateDisconnected, nil)
 		}
 
 	case messages.MessageTypePipelineHostCall:
@@ -378,10 +452,17 @@ func (p *Pipeline) transition(newState State, err error) {
 	p.state = newState
 	p.err = err
 
-	if newState == StateCompleted || newState == StateFailed || newState == StateStopped {
+	// Terminal states: close channels and cancel context
+	if newState == StateCompleted || newState == StateFailed || newState == StateStopped || newState == StateDisconnected {
 		close(p.doneCh)
 		close(p.outputCh)
 		close(p.errorCh)
 		p.cancel()
 	}
+}
+
+// Fail transitions the pipeline to StateFailed with the given error.
+// This is used by the runspace pool to signal a fatal transport error.
+func (p *Pipeline) Fail(err error) {
+	p.transition(StateFailed, err)
 }

@@ -78,6 +78,17 @@ const (
 	CLIXMLVersion   = "1.1.0.1"
 )
 
+// safeInt32 safely converts an int to int32, capping at bounds to prevent overflow.
+func safeInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
+}
+
 var (
 	// ErrUnsupportedType is returned for unsupported types.
 	ErrUnsupportedType = errors.New("unsupported type")
@@ -695,14 +706,14 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 func ProgressRecordToPSObject(record *objects.ProgressRecord) *PSObject {
 	props := make(map[string]interface{})
 
-	props["ActivityId"] = int32(record.ActivityId)
-	props["ParentActivityId"] = int32(record.ParentActivityId)
+	props["ActivityId"] = safeInt32(record.ActivityId)
+	props["ParentActivityId"] = safeInt32(record.ParentActivityId)
 	props["Activity"] = record.Activity
 	props["StatusDescription"] = record.StatusDescription
 	props["CurrentOperation"] = record.CurrentOperation
-	props["PercentComplete"] = int32(record.PercentComplete)
-	props["SecondsRemaining"] = int32(record.SecondsRemaining)
-	props["RecordType"] = int32(record.RecordType)
+	props["PercentComplete"] = safeInt32(record.PercentComplete)
+	props["SecondsRemaining"] = safeInt32(record.SecondsRemaining)
+	props["RecordType"] = safeInt32(int(record.RecordType))
 
 	return &PSObject{
 		TypeNames: []string{

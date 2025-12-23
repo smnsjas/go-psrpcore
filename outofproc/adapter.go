@@ -31,7 +31,8 @@ type Adapter struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// Callbacks for non-data packets
+	// Callbacks for non-data packets (protected by handlerMu)
+	handlerMu    sync.RWMutex
 	onCommandAck func(pipelineGuid uuid.UUID)
 	onCloseAck   func(psGuid uuid.UUID)
 	onSignalAck  func(psGuid uuid.UUID)
@@ -59,16 +60,22 @@ func NewAdapter(transport *Transport, runspaceGuid uuid.UUID) *Adapter {
 
 // SetCommandAckHandler sets a callback for CommandAck packets.
 func (a *Adapter) SetCommandAckHandler(handler func(pipelineGuid uuid.UUID)) {
+	a.handlerMu.Lock()
+	defer a.handlerMu.Unlock()
 	a.onCommandAck = handler
 }
 
 // SetCloseAckHandler sets a callback for CloseAck packets.
 func (a *Adapter) SetCloseAckHandler(handler func(psGuid uuid.UUID)) {
+	a.handlerMu.Lock()
+	defer a.handlerMu.Unlock()
 	a.onCloseAck = handler
 }
 
 // SetSignalAckHandler sets a callback for SignalAck packets.
 func (a *Adapter) SetSignalAckHandler(handler func(psGuid uuid.UUID)) {
+	a.handlerMu.Lock()
+	defer a.handlerMu.Unlock()
 	a.onSignalAck = handler
 }
 
@@ -108,13 +115,19 @@ func (a *Adapter) readLoop() {
 			// Acknowledgment - could be used for flow control
 
 		case PacketTypeCommandAck:
-			if a.onCommandAck != nil {
-				a.onCommandAck(packet.PSGuid)
+			a.handlerMu.RLock()
+			handler := a.onCommandAck
+			a.handlerMu.RUnlock()
+			if handler != nil {
+				handler(packet.PSGuid)
 			}
 
 		case PacketTypeCloseAck:
-			if a.onCloseAck != nil {
-				a.onCloseAck(packet.PSGuid)
+			a.handlerMu.RLock()
+			handler := a.onCloseAck
+			a.handlerMu.RUnlock()
+			if handler != nil {
+				handler(packet.PSGuid)
 			}
 			// If it's the session close, we're done
 			if IsSessionGUID(packet.PSGuid) {
@@ -122,8 +135,11 @@ func (a *Adapter) readLoop() {
 			}
 
 		case PacketTypeSignalAck:
-			if a.onSignalAck != nil {
-				a.onSignalAck(packet.PSGuid)
+			a.handlerMu.RLock()
+			handler := a.onSignalAck
+			a.handlerMu.RUnlock()
+			if handler != nil {
+				handler(packet.PSGuid)
 			}
 		}
 	}

@@ -13,13 +13,14 @@ import (
 	"github.com/smnsjas/go-psrpcore/host"
 	"github.com/smnsjas/go-psrpcore/messages"
 	"github.com/smnsjas/go-psrpcore/pipeline"
+	"github.com/smnsjas/go-psrpcore/serialization"
 )
 
 // mockTransport is a mock transport for testing.
 type mockTransport struct {
-	readBuf     *bytes.Buffer
-	writeBuf    *bytes.Buffer
-	fragmenter  *fragments.Fragmenter
+	readBuf       *bytes.Buffer
+	writeBuf      *bytes.Buffer
+	fragmenter    *fragments.Fragmenter
 	readAssembler *fragments.Assembler
 }
 
@@ -864,7 +865,7 @@ func TestParseRunspacePoolState(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "invalid type (string instead of int32)",
+			name: "invalid type (string instead of int32)",
 			data: []byte(`<?xml version="1.0" encoding="utf-8"?>
 <Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
   <S>not a number</S>
@@ -1001,5 +1002,145 @@ func TestReceiveSessionCapability_VersionValidation(t *testing.T) {
 				pool.mu.RUnlock()
 			}
 		})
+	}
+}
+
+// --- Merged from metadata_test.go ---
+
+// simpleMockTransport is a simple mock that enables testing of GetCommandMetadata
+type simpleMockTransport struct {
+	sentData []byte
+}
+
+func (m *simpleMockTransport) Write(p []byte) (n int, err error) {
+	m.sentData = append(m.sentData, p...)
+	return len(p), nil
+}
+
+func (m *simpleMockTransport) Read(p []byte) (n int, err error) {
+	return 0, nil
+}
+
+func TestGetCommandMetadata(t *testing.T) {
+	transport := &simpleMockTransport{}
+
+	pool := New(transport, uuid.New())
+	pool.state = StateOpened
+
+	meta := &serialization.PSObject{
+		Properties: map[string]interface{}{
+			"Name":        "Get-Process",
+			"CommandType": int32(8), // Cmdlet
+			"Parameters": map[string]interface{}{
+				"Id": &serialization.PSObject{
+					Properties: map[string]interface{}{
+						"ParameterType": "System.Int32",
+					},
+				},
+			},
+		},
+	}
+
+	serializer := serialization.NewSerializer()
+	replyData, _ := serializer.Serialize(meta)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+
+		replyMsg := &messages.Message{
+			Type: messages.MessageTypeGetCommandMetadataReply,
+			Data: replyData,
+		}
+		pool.metadataCh <- replyMsg
+	}()
+
+	results, err := pool.GetCommandMetadata(context.Background(), []string{"Get-Process"})
+	if err != nil {
+		t.Fatalf("GetCommandMetadata failed: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+
+	cmd := results[0]
+	if cmd.Name != "Get-Process" {
+		t.Errorf("Expected Name 'Get-Process', got '%s'", cmd.Name)
+	}
+	if cmd.CommandType != 8 {
+		t.Errorf("Expected CommandType 8, got %d", cmd.CommandType)
+	}
+
+	param, ok := cmd.Parameters["Id"]
+	if !ok {
+		t.Error("Expected parameter 'Id' not found")
+	}
+	if param.Type != "System.Int32" {
+		t.Errorf("Expected Id type 'System.Int32', got '%s'", param.Type)
+	}
+}
+
+// --- Merged from memory_verification_test.go ---
+
+// blockingMockReadWriter is a mock that blocks on Read to simulate idle connection
+type blockingMockReadWriter struct{}
+
+func (m *blockingMockReadWriter) Read(p []byte) (n int, err error) {
+	select {} // Block indefinitely
+}
+
+func (m *blockingMockReadWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func TestRunspacePool_PipelineCleanup(t *testing.T) {
+	pool := New(&blockingMockReadWriter{}, uuid.New())
+	pool.state = StateOpened
+
+	pl, err := pool.CreatePipeline("Get-Date")
+	if err != nil {
+		t.Fatalf("CreatePipeline failed: %v", err)
+	}
+
+	pool.mu.RLock()
+	if _, ok := pool.pipelines[pl.ID()]; !ok {
+		pool.mu.RUnlock()
+		t.Fatal("Pipeline not found in map immediately after creation")
+	}
+	pool.mu.RUnlock()
+
+	msg := &messages.Message{
+		PipelineID: pl.ID(),
+		Type:       messages.MessageTypePipelineState,
+		Data:       []byte{},
+	}
+
+	err = pl.HandleMessage(msg)
+	if err != nil {
+		t.Fatalf("HandleMessage failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+	if _, ok := pool.pipelines[pl.ID()]; ok {
+		t.Error("Pipeline was NOT removed from map after completion")
+	}
+}
+
+func TestRunspacePool_ContextLifecycle(t *testing.T) {
+	pool := New(&blockingMockReadWriter{}, uuid.New())
+	pool.state = StateOpened
+
+	go pool.dispatchLoop(pool.ctx)
+
+	pool.Close(context.Background())
+
+	select {
+	case <-pool.ctx.Done():
+		// Success
+	case <-time.After(1 * time.Second):
+		t.Error("Pool context was not cancelled after Close()")
 	}
 }

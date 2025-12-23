@@ -5,6 +5,7 @@ import (
 )
 
 func TestNewNullHost(t *testing.T) {
+	t.Parallel()
 	h := NewNullHost()
 	if h == nil {
 		t.Fatal("NewNullHost returned nil")
@@ -28,6 +29,7 @@ func TestNewNullHost(t *testing.T) {
 }
 
 func TestNullHostUI_Methods(t *testing.T) {
+	t.Parallel()
 	h := NewNullHost()
 	ui := h.UI()
 	if ui == nil {
@@ -97,6 +99,7 @@ func TestNullHostUI_Methods(t *testing.T) {
 }
 
 func TestCredentialTypes(t *testing.T) {
+	t.Parallel()
 	// Simple smoke test for constants
 	if CredentialTypeGeneric == 0 {
 		t.Error("CredentialTypeGeneric should not be 0")
@@ -107,12 +110,14 @@ func TestCredentialTypes(t *testing.T) {
 }
 
 func TestMockHostImplementation(t *testing.T) {
+	t.Parallel()
 	// Verify that MockHost implements Host interface (compile-time check)
 	var _ Host = (*NullHost)(nil)
 	var _ HostUI = (*NullHostUI)(nil)
 }
 
 func TestFieldDescription(t *testing.T) {
+	t.Parallel()
 	fd := FieldDescription{
 		Name:        "test",
 		IsMandatory: true,
@@ -123,6 +128,7 @@ func TestFieldDescription(t *testing.T) {
 }
 
 func TestChoiceDescription(t *testing.T) {
+	t.Parallel()
 	cd := ChoiceDescription{
 		Label:       "Yes",
 		HelpMessage: "Accept",

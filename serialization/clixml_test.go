@@ -9,6 +9,7 @@ import (
 )
 
 func TestSerializePrimitives(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    interface{}
@@ -49,6 +50,7 @@ func TestSerializePrimitives(t *testing.T) {
 }
 
 func TestSerializeSpecialCharacters(t *testing.T) {
+	t.Parallel()
 	s := NewSerializer()
 	data, err := s.Serialize("<script>alert('xss')</script>")
 	if err != nil {
@@ -66,6 +68,7 @@ func TestSerializeSpecialCharacters(t *testing.T) {
 }
 
 func TestSerializeList(t *testing.T) {
+	t.Parallel()
 	s := NewSerializer()
 	data, err := s.Serialize([]interface{}{"a", "b", "c"})
 	if err != nil {
@@ -85,6 +88,7 @@ func TestSerializeList(t *testing.T) {
 }
 
 func TestSerializeByteArray(t *testing.T) {
+	t.Parallel()
 	s := NewSerializer()
 	data, err := s.Serialize([]byte{0x01, 0x02, 0x03, 0x04})
 	if err != nil {
@@ -102,6 +106,7 @@ func TestSerializeByteArray(t *testing.T) {
 }
 
 func TestDeserializePrimitives(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		clixml   string
@@ -159,6 +164,7 @@ func TestDeserializePrimitives(t *testing.T) {
 }
 
 func TestDeserializeList(t *testing.T) {
+	t.Parallel()
 	clixml := `<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
 		<LST>
 			<S>a</S>
@@ -195,6 +201,7 @@ func TestDeserializeList(t *testing.T) {
 }
 
 func TestRoundTrip(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value interface{}
@@ -248,6 +255,7 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestPSObjectRoundTrip(t *testing.T) {
+	t.Parallel()
 	obj := &PSObject{
 		TypeNames: []string{"System.Management.Automation.PSCustomObject", "System.Object"},
 		Properties: map[string]interface{}{
@@ -310,6 +318,7 @@ func TestPSObjectRoundTrip(t *testing.T) {
 }
 
 func TestHashtableRoundTrip(t *testing.T) {
+	t.Parallel()
 	hashtable := map[string]interface{}{
 		"key1": "value1",
 		"key2": int32(42),
@@ -363,6 +372,7 @@ func TestHashtableRoundTrip(t *testing.T) {
 }
 
 func TestReferenceTracking(t *testing.T) {
+	t.Parallel()
 	// Create a PSObject
 	shared := &PSObject{
 		TypeNames: []string{"Shared.Object"},
@@ -423,6 +433,7 @@ func TestReferenceTracking(t *testing.T) {
 }
 
 func TestTypeNameReuse(t *testing.T) {
+	t.Parallel()
 	// Create two objects with the same TypeNames
 	obj1 := &PSObject{
 		TypeNames: []string{"Custom.Type", "System.Object"},
@@ -489,6 +500,7 @@ func TestTypeNameReuse(t *testing.T) {
 }
 
 func TestNestedObjects(t *testing.T) {
+	t.Parallel()
 	nested := &PSObject{
 		TypeNames: []string{"Nested.Object"},
 		Properties: map[string]interface{}{
@@ -545,6 +557,7 @@ func TestNestedObjects(t *testing.T) {
 }
 
 func TestErrorRecordSerialization(t *testing.T) {
+	t.Parallel()
 	errRec := &objects.ErrorRecord{
 		Exception: objects.ExceptionInfo{
 			Type:       "System.InvalidOperationException",
@@ -622,6 +635,7 @@ func TestErrorRecordSerialization(t *testing.T) {
 }
 
 func TestDeserializerRecursionDepthProtection(t *testing.T) {
+	t.Parallel()
 	// Create deeply nested XML that would cause stack overflow without protection
 	buildNestedXML := func(depth int) string {
 		xml := `<?xml version="1.0" encoding="UTF-8"?>
@@ -687,6 +701,7 @@ func TestDeserializerRecursionDepthProtection(t *testing.T) {
 }
 
 func TestSerializePowerShell(t *testing.T) {
+	t.Parallel()
 	ps := objects.NewPowerShell()
 	ps.AddCommand("Get-Process", false)
 	ps.AddParameter("Id", 123)

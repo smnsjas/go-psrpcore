@@ -5,6 +5,7 @@ import (
 )
 
 func TestSecureString(t *testing.T) {
+	t.Parallel()
 	plaintext := "MySecretPassword"
 
 	// Test creation
@@ -40,6 +41,7 @@ func TestSecureString(t *testing.T) {
 }
 
 func TestNewSecureStringFromEncrypted(t *testing.T) {
+	t.Parallel()
 	originalData := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	ss := NewSecureStringFromEncrypted(originalData)
 
@@ -56,6 +58,7 @@ func TestNewSecureStringFromEncrypted(t *testing.T) {
 }
 
 func TestPSCredential(t *testing.T) {
+	t.Parallel()
 	user := "domain\\user"
 	pass := "secret"
 	ss, _ := NewSecureString(pass)
@@ -78,6 +81,7 @@ func TestPSCredential(t *testing.T) {
 }
 
 func TestPowerShellBuilder(t *testing.T) {
+	t.Parallel()
 	ps := NewPowerShell()
 
 	// Test AddCommand
@@ -116,6 +120,7 @@ func TestPowerShellBuilder(t *testing.T) {
 }
 
 func TestScriptBlock(t *testing.T) {
+	t.Parallel()
 	sb := ScriptBlock{Text: "Write-Host 'Hello'"}
 	if sb.String() != "Write-Host 'Hello'" {
 		t.Errorf("ScriptBlock.String() mismatch: %q", sb.String())
@@ -123,6 +128,7 @@ func TestScriptBlock(t *testing.T) {
 }
 
 func TestCommandMetdata(t *testing.T) {
+	t.Parallel()
 	// Simple struct test
 	cm := CommandMetadata{
 		Name:        "Get-Test",

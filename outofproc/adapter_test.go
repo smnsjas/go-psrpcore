@@ -17,7 +17,7 @@ func TestAdapterWrite(t *testing.T) {
 
 	runspaceID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
 	adapter := NewAdapter(transport, runspaceID)
-	defer adapter.Close()
+	t.Cleanup(func() { adapter.Close() })
 
 	testData := []byte("Hello, PSRP!")
 	n, err := adapter.Write(testData)
@@ -49,7 +49,7 @@ func TestAdapterRead(t *testing.T) {
 
 	transport := NewTransport(strings.NewReader(input), io.Discard)
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.cancel() // Cancel context to stop read loop
+	t.Cleanup(adapter.cancel) // Cancel context to stop read loop
 
 	// Give the read loop time to process the packet
 	time.Sleep(50 * time.Millisecond)
@@ -75,7 +75,7 @@ func TestAdapterMultipleReads(t *testing.T) {
 
 	transport := NewTransport(strings.NewReader(input), io.Discard)
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.cancel()
+	t.Cleanup(adapter.cancel)
 
 	// Give the read loop time to process all packets
 	time.Sleep(100 * time.Millisecond)
@@ -100,7 +100,7 @@ func TestAdapterReadAfterEOF(t *testing.T) {
 
 	transport := NewTransport(strings.NewReader(input), io.Discard)
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.cancel()
+	t.Cleanup(adapter.cancel)
 
 	// Wait for read loop to process and hit EOF
 	time.Sleep(100 * time.Millisecond)
@@ -127,7 +127,7 @@ func TestAdapterSendCommand(t *testing.T) {
 	transport := NewTransport(strings.NewReader(""), &buf)
 
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.Close()
+	t.Cleanup(func() { adapter.Close() })
 
 	pipelineID := uuid.MustParse("abcdef12-3456-7890-abcd-ef1234567890")
 	err := adapter.SendCommand(pipelineID)
@@ -147,7 +147,7 @@ func TestAdapterSendPipelineData(t *testing.T) {
 	transport := NewTransport(strings.NewReader(""), &buf)
 
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.Close()
+	t.Cleanup(func() { adapter.Close() })
 
 	pipelineID := uuid.MustParse("abcdef12-3456-7890-abcd-ef1234567890")
 	err := adapter.SendPipelineData(pipelineID, []byte("test"))
@@ -167,7 +167,7 @@ func TestAdapterSendSignal(t *testing.T) {
 	transport := NewTransport(strings.NewReader(""), &buf)
 
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.Close()
+	t.Cleanup(func() { adapter.Close() })
 
 	pipelineID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
 	err := adapter.SendSignal(pipelineID)
@@ -188,7 +188,7 @@ func TestAdapterCommandAckCallback(t *testing.T) {
 
 	transport := NewTransport(strings.NewReader(input), io.Discard)
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.cancel()
+	t.Cleanup(adapter.cancel)
 
 	var receivedGUID uuid.UUID
 	var callbackCalled bool
@@ -221,7 +221,7 @@ func TestAdapterCloseAckCallback(t *testing.T) {
 
 	transport := NewTransport(strings.NewReader(input), io.Discard)
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.cancel()
+	t.Cleanup(adapter.cancel)
 
 	var callbackCalled bool
 	var mu sync.Mutex
@@ -245,7 +245,7 @@ func TestAdapterTransport(t *testing.T) {
 	var buf bytes.Buffer
 	transport := NewTransport(strings.NewReader(""), &buf)
 	adapter := NewAdapter(transport, NullGUID)
-	defer adapter.cancel()
+	t.Cleanup(adapter.cancel)
 
 	if adapter.Transport() != transport {
 		t.Error("Transport() did not return the expected transport")

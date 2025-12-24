@@ -199,7 +199,7 @@ func runConcurrentTest(ctx context.Context, pool *runspace.Pool) bool {
 	errors := make([]error, 2)
 
 	// Helper to run a pipeline and collect output
-	runPipeline := func(idx int, pl *pipeline.Pipeline, name string) {
+	runPipeline := func(idx int, pl *pipeline.Pipeline, _ string) {
 		defer wg.Done()
 
 		var output strings.Builder

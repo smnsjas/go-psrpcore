@@ -1015,7 +1015,7 @@ func (m *simpleMockTransport) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func (m *simpleMockTransport) Read(p []byte) (n int, err error) {
+func (m *simpleMockTransport) Read(_ []byte) (n int, err error) {
 	return 0, nil
 }
 
@@ -1088,7 +1088,7 @@ func TestGetCommandMetadata(t *testing.T) {
 // blockingMockReadWriter is a mock that blocks on Read to simulate idle connection
 type blockingMockReadWriter struct{}
 
-func (m *blockingMockReadWriter) Read(p []byte) (n int, err error) {
+func (m *blockingMockReadWriter) Read(_ []byte) (n int, err error) {
 	select {} // Block indefinitely
 }
 

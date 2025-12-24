@@ -17,7 +17,7 @@ func TestNewNullHost(t *testing.T) {
 	if h.GetVersion().Major != 1 {
 		t.Errorf("expected default version major 1, got %d", h.GetVersion().Major)
 	}
-	if h.GetInstanceId() == "" {
+	if h.GetInstanceID() == "" {
 		t.Error("expected non-empty instance id")
 	}
 	if h.GetCurrentCulture() != DefaultCulture {
@@ -56,7 +56,7 @@ func TestNullHostUI_Methods(t *testing.T) {
 		}
 	})
 
-	t.Run("WriteMethods", func(t *testing.T) {
+	t.Run("WriteMethods", func(_ *testing.T) {
 		// Verify these do not panic
 		ui.Write("test")
 		ui.WriteLine("test")

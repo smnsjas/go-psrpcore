@@ -207,6 +207,7 @@ type CategoryInfo struct {
 // ErrorCategory represents PowerShell error categories.
 type ErrorCategory int
 
+// ErrorCategory constants represent PowerShell error categories.
 const (
 	ErrorCategoryNotSpecified ErrorCategory = iota
 	ErrorCategoryOpenError
@@ -263,6 +264,7 @@ type ProgressRecord struct {
 // ProgressRecordType indicates the type of progress record.
 type ProgressRecordType int
 
+// ProgressRecordType constants indicate the type of progress record.
 const (
 	ProgressRecordTypeProcessing ProgressRecordType = iota
 	ProgressRecordTypeCompleted

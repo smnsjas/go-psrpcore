@@ -1,3 +1,4 @@
+// Package main is the PSRP client entrypoint.
 package main
 
 import (

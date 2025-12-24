@@ -18,7 +18,7 @@ type mockTransport struct {
 	err  error
 }
 
-func (m *mockTransport) SendMessage(ctx context.Context, msg *messages.Message) error {
+func (m *mockTransport) SendMessage(_ context.Context, msg *messages.Message) error {
 	if m.err != nil {
 		return m.err
 	}

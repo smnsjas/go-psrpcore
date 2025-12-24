@@ -65,7 +65,7 @@ import (
 	"sync"
 )
 
-// Fragment header size in bytes.
+// HeaderSize is the fragment header size in bytes.
 const HeaderSize = 21
 
 // Flag bits for fragment headers.

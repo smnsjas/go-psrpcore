@@ -162,7 +162,7 @@ const (
 	MessageTypePipelineHostResponse MessageType = 0x00041101
 )
 
-// Message header size in bytes.
+// HeaderSize is the message header size in bytes.
 const HeaderSize = 40 // 4 (Destination) + 4 (MessageType) + 16 (RPID) + 16 (PID)
 
 var (
@@ -321,6 +321,7 @@ func NewInitRunspacePool(runspaceID uuid.UUID, data []byte) *Message {
 // RunspacePoolState represents the state of a runspace pool.
 type RunspacePoolState int32
 
+// RunspacePoolState constants represent the state of a runspace pool.
 const (
 	RunspacePoolStateBeforeOpen   RunspacePoolState = 0
 	RunspacePoolStateOpening      RunspacePoolState = 1

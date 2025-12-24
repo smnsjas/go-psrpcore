@@ -100,8 +100,12 @@ func (t *Transport) SendDataWithStream(psGUID uuid.UUID, stream Stream, data []b
 	buf.WriteString("'>")
 
 	encoder := base64.NewEncoder(base64.StdEncoding, buf)
-	encoder.Write(data)
-	encoder.Close()
+	if _, err := encoder.Write(data); err != nil {
+		return fmt.Errorf("base64 encode: %w", err)
+	}
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("base64 close: %w", err)
+	}
 
 	buf.WriteString("</Data>\n")
 
@@ -224,9 +228,7 @@ func (t *Transport) ReceivePacket() (*Packet, error) {
 func parsePacket(line string) (*Packet, error) {
 	// Trim whitespace and BOM (rare but possible)
 	line = strings.TrimSpace(line)
-	if strings.HasPrefix(line, "\xEF\xBB\xBF") {
-		line = line[3:]
-	}
+	line = strings.TrimPrefix(line, "\xEF\xBB\xBF")
 
 	if len(line) < 5 { // Minimal packet: <A/>
 		return nil, fmt.Errorf("line too short: %q", line)

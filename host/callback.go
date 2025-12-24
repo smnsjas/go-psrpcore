@@ -92,6 +92,12 @@ const (
 	MethodIDPromptForChoiceMultipleSelection MethodID = 56 // Prompt for multiple choices
 )
 
+// Default values for host responses
+const (
+	// DefaultCulture is the default culture string returned when no host is configured.
+	DefaultCulture = "en-US"
+)
+
 // String returns the string representation of a method ID.
 func (m MethodID) String() string {
 	switch m {
@@ -533,7 +539,7 @@ func (h *CallbackHandler) handleGetInstanceID(_ *RemoteHostCall) (interface{}, e
 // Returns: string (e.g., "en-US")
 func (h *CallbackHandler) handleGetCurrentCulture(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
-		return "en-US", nil
+		return DefaultCulture, nil
 	}
 	return h.host.GetCurrentCulture(), nil
 }
@@ -543,7 +549,7 @@ func (h *CallbackHandler) handleGetCurrentCulture(_ *RemoteHostCall) (interface{
 // Returns: string (e.g., "en-US")
 func (h *CallbackHandler) handleGetCurrentUICulture(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
-		return "en-US", nil
+		return DefaultCulture, nil
 	}
 	return h.host.GetCurrentUICulture(), nil
 }

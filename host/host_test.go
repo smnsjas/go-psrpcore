@@ -20,10 +20,10 @@ func TestNewNullHost(t *testing.T) {
 	if h.GetInstanceId() == "" {
 		t.Error("expected non-empty instance id")
 	}
-	if h.GetCurrentCulture() != "en-US" {
+	if h.GetCurrentCulture() != DefaultCulture {
 		t.Errorf("expected culture 'en-US', got %q", h.GetCurrentCulture())
 	}
-	if h.GetCurrentUICulture() != "en-US" {
+	if h.GetCurrentUICulture() != DefaultCulture {
 		t.Errorf("expected UI culture 'en-US', got %q", h.GetCurrentUICulture())
 	}
 }

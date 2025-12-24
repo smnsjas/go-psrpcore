@@ -235,7 +235,7 @@ func TestRoundTrip(t *testing.T) {
 			switch expected := tt.value.(type) {
 			case int:
 				// int serializes as I32
-				if results[0] != int32(expected) {
+				if results[0] != safeInt32(expected) {
 					t.Errorf("expected %v, got %v", expected, results[0])
 				}
 			case []interface{}:

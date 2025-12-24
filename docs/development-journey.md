@@ -320,6 +320,8 @@ go run ./cmd/psrp-test
 - Terminating and non-terminating error differentiation
 - Concurrent pipeline execution
 - OutOfProcess (SSH) transport framing
+- **High-throughput concurrency** (sync.Map optimized)
+- **Robust resource cleanup** (Context-based lifecycle management)
 
 ⏳ **Future Work:**
 - WinRM transport implementation

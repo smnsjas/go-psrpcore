@@ -205,3 +205,7 @@ go test -v ./...
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgements
+
+This library references the [pypsrp](https://github.com/jborean93/pypsrp) and [psrpcore](https://github.com/jborean93/psrpcore) projects by [Jordan Borean](https://github.com/jborean93). These implementations served as the primary reference for the protocol logic.

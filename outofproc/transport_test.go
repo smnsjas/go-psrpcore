@@ -265,7 +265,7 @@ func TestRoundTrip(t *testing.T) {
 		if err := serverTransport.SendData(testGUID, testData); err != nil {
 			t.Errorf("SendData() error = %v", err)
 		}
-		pw.Close()
+		_ = pw.Close()
 	}()
 
 	// Receive

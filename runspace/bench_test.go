@@ -27,7 +27,7 @@ func BenchmarkMap_RWMutex(b *testing.B) {
 		for pb.Next() {
 			id := ids[i%100]
 			mu.RLock()
-			_, _ = m[id]
+			_ = m[id]
 			mu.RUnlock()
 			i++
 		}
@@ -51,7 +51,7 @@ func BenchmarkMap_SyncMap(b *testing.B) {
 		i := 0
 		for pb.Next() {
 			id := ids[i%100]
-			_, _ = m.Load(id)
+			m.Load(id)
 			i++
 		}
 	})

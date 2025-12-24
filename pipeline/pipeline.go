@@ -310,6 +310,12 @@ func (p *Pipeline) Wait() error {
 	return p.err
 }
 
+// Done returns a channel that is closed when the pipeline completes.
+// This can be used with select for non-blocking completion checks.
+func (p *Pipeline) Done() <-chan struct{} {
+	return p.doneCh
+}
+
 // HandleMessage processes an incoming message destined for this pipeline.
 // Messages are delivered to buffered channels with timeout-based back-pressure.
 // If a channel buffer is full, this method will block for up to channelTimeout

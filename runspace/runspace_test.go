@@ -28,7 +28,7 @@ func newMockTransport() *mockTransport {
 	return &mockTransport{
 		readBuf:       &bytes.Buffer{},
 		writeBuf:      &bytes.Buffer{},
-		fragmenter:    fragments.NewFragmenter(32768),
+		fragmenter:    fragments.NewFragmenter(DefaultMaxFragmentSize),
 		readAssembler: fragments.NewAssembler(),
 	}
 }
@@ -480,7 +480,7 @@ func TestDispatchLoopTransportError(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		fragmenter := fragments.NewFragmenter(32768)
+		fragmenter := fragments.NewFragmenter(DefaultMaxFragmentSize)
 		frags, err := fragmenter.Fragment(encoded)
 		if err != nil {
 			return err

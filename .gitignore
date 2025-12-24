@@ -54,3 +54,7 @@ test/benchmarks/
 test/profiles/
 *.prof
 *.pprof
+
+# Vscode workspace file
+.vscode/
+.code-workspace

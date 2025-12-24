@@ -133,6 +133,18 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 └─────────────────────────────────────────┘
 ```
 
+## Design & Performance
+
+We maintain detailed design documentation and performance analysis in the `docs/` directory:
+
+- [Development Journey](docs/development-journey.md) - Lessons learned building the protocol
+- [Architecture & Endianness](docs/endianness-verification.md) - Protocol details
+- [Security Implementation](docs/issue-6-securestring-findings.md) - SecureString and encryption details
+- [Performance Baselines](docs/BASELINE_PERFORMANCE.md) - Benchmark results
+
+See [docs/README.md](docs/README.md) for the full index.
+
+
 ## Testing
 
 This library uses a **Sans-IO** design, making it easy to test without a live PowerShell server.
@@ -159,7 +171,37 @@ go test ./...
 
 ## Contributing
 
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+Contributions are welcome! We follow standard Go project guidelines.
+
+### Reporting Bugs
+
+Please open an issue on GitHub with:
+1. A clear description of the bug
+2. Minimal reproduction steps
+3. Full stack trace (if applicable)
+4. Environment details (OS, Go version, PowerShell version)
+
+### Pull Requests
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Coding Standards
+
+- **Formatting**: run `go fmt ./...`
+- **Linting**: We use `golangci-lint`. Ensure your code passes all linters.
+- **Tests**: Add unit tests for new features. Ensure all tests pass.
+
+### Running Tests
+
+Run the full test suite:
+
+```bash
+go test -v ./...
+```
 
 ## License
 

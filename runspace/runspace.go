@@ -434,7 +434,8 @@ func (p *Pool) setBroken() {
 func (p *Pool) sendSessionCapability(ctx context.Context) error {
 	// SESSION_CAPABILITY uses raw <Obj> without <Objs> wrapper per MS-PSRP
 	// XML must be compact (no whitespace) for OutOfProcess transport
-	capabilityData := []byte(`<Obj RefId="0"><MS><Version N="protocolversion">2.3</Version><Version N="PSVersion">2.0</Version><Version N="SerializationVersion">1.1.0.1</Version></MS></Obj>`)
+	capabilityData := []byte(`<Obj RefId="0"><MS><Version N="protocolversion">2.3</Version>` +
+		`<Version N="PSVersion">2.0</Version><Version N="SerializationVersion">1.1.0.1</Version></MS></Obj>`)
 
 	msg := messages.NewSessionCapability(uuid.Nil, capabilityData)
 	return p.sendMessage(ctx, msg)
@@ -489,10 +490,12 @@ func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 		`<I32 N="MinRunspaces">%d</I32>`+
 		`<I32 N="MaxRunspaces">%d</I32>`+
 		`<Obj N="PSThreadOptions" RefId="1">`+
-		`<TN RefId="0"><T>System.Management.Automation.Runspaces.PSThreadOptions</T><T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>`+
+		`<TN RefId="0"><T>System.Management.Automation.Runspaces.PSThreadOptions</T>`+
+		`<T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>`+
 		`<ToString>Default</ToString><I32>0</I32></Obj>`+
 		`<Obj N="ApartmentState" RefId="2">`+
-		`<TN RefId="1"><T>System.Threading.ApartmentState</T><T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>`+
+		`<TN RefId="1"><T>System.Threading.ApartmentState</T>`+
+		`<T>System.Enum</T><T>System.ValueType</T><T>System.Object</T></TN>`+
 		`<ToString>Unknown</ToString><I32>2</I32></Obj>`+
 		`<Obj N="HostInfo" RefId="3"><MS>`+
 		`<B N="_isHostNull">true</B>`+

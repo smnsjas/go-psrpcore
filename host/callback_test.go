@@ -24,7 +24,7 @@ func newMockHost() *mockHost {
 
 func (h *mockHost) GetName() string             { return "MockHost" }
 func (h *mockHost) GetVersion() Version         { return Version{Major: 1, Minor: 0} }
-func (h *mockHost) GetInstanceId() string       { return "mock-id" }
+func (h *mockHost) GetInstanceID() string       { return "mock-id" }
 func (h *mockHost) GetCurrentCulture() string   { return DefaultCulture }
 func (h *mockHost) GetCurrentUICulture() string { return DefaultCulture }
 func (h *mockHost) UI() HostUI                  { return h.ui }
@@ -91,15 +91,15 @@ func (ui *mockHostUI) WriteProgress(sourceID int64, record *objects.ProgressReco
 	ui.lastProgressRecord = record
 }
 
-func (ui *mockHostUI) Prompt(caption, message string, descriptions []FieldDescription) (map[string]interface{}, error) {
+func (ui *mockHostUI) Prompt(_, _ string, descriptions []FieldDescription) (map[string]interface{}, error) {
 	return ui.promptResult, ui.promptError
 }
 
-func (ui *mockHostUI) PromptForCredential(caption, message, userName, targetName string, allowedCredentialTypes CredentialTypes, options CredentialUIOptions) (*objects.PSCredential, error) {
+func (ui *mockHostUI) PromptForCredential(_, _, userName, targetName string, allowedCredentialTypes CredentialTypes, options CredentialUIOptions) (*objects.PSCredential, error) {
 	return ui.credentialResult, ui.credentialError
 }
 
-func (ui *mockHostUI) PromptForChoice(caption, message string, choices []ChoiceDescription, defaultChoice int) (int, error) {
+func (ui *mockHostUI) PromptForChoice(_, _ string, choices []ChoiceDescription, defaultChoice int) (int, error) {
 	return ui.choiceResult, ui.choiceError
 }
 
@@ -441,7 +441,7 @@ func TestCallbackHandler_HandleWriteLine2(t *testing.T) {
 	}
 }
 
-func TestCallbackHandler_HandleGetInstanceId(t *testing.T) {
+func TestCallbackHandler_HandleGetInstanceID(t *testing.T) {
 	host := newMockHost()
 	handler := NewCallbackHandler(host)
 
@@ -1199,7 +1199,7 @@ func TestConvertToChoiceDescription_MissingOptional(t *testing.T) {
 	}
 }
 
-func TestCallbackHandler_HandlePromptForChoiceMultipleSelection(t *testing.T) {
+func TestCallbackHandler_HandlePromptForChoiceMultipleSelection(_ *testing.T) {
 	host := newMockHost()
 	host.ui.choiceResult = 0 // Mock returns int, but this method needs []int handling in real UI
 	// We need to update mockHostUI to support generic prompt result or specifically multiple choice
@@ -1225,6 +1225,7 @@ func TestCallbackHandler_HandlePromptForChoiceMultipleSelection(t *testing.T) {
 
 	// In the basic implementation within callback.go, it might call PromptForChoice (singular)
 	// or fail if not implemented. Let's inspect the ReturnValue.
+	//nolint:revive,staticcheck // empty block is intentional placeholder
 	if response.ExceptionRaised {
 		// This is acceptable if not supported, but we should verify behavior.
 		// If it succeeded, check return value.

@@ -37,8 +37,8 @@ type Host interface {
 	// GetVersion returns the host version.
 	GetVersion() Version
 
-	// GetInstanceId returns a unique identifier for this host instance.
-	GetInstanceId() string
+	// GetInstanceID returns a unique identifier for this host instance.
+	GetInstanceID() string
 
 	// GetCurrentCulture returns the current culture (e.g., "en-US").
 	GetCurrentCulture() string
@@ -51,6 +51,8 @@ type Host interface {
 }
 
 // HostUI defines the user interface callbacks.
+//
+//nolint:revive // HostUI is the established name, suppressing stutter warning
 type HostUI interface {
 	// ReadLine reads a line of text from the user.
 	ReadLine() (string, error)
@@ -109,7 +111,7 @@ type FieldDescription struct {
 
 // ChoiceDescription describes a choice option.
 type ChoiceDescription struct {
-	Label      string
+	Label       string
 	HelpMessage string
 }
 
@@ -117,8 +119,11 @@ type ChoiceDescription struct {
 type CredentialTypes int
 
 const (
+	// CredentialTypeGeneric allows generic credentials.
 	CredentialTypeGeneric CredentialTypes = 1 << iota
+	// CredentialTypeDomain allows domain credentials.
 	CredentialTypeDomain
+	// CredentialTypeDefault allows default credentials.
 	CredentialTypeDefault = CredentialTypeGeneric | CredentialTypeDomain
 )
 
@@ -126,9 +131,13 @@ const (
 type CredentialUIOptions int
 
 const (
+	// CredentialUIOptionNone indicates no specific UI options.
 	CredentialUIOptionNone CredentialUIOptions = iota
+	// CredentialUIOptionValidateUserNameSyntax validates username syntax.
 	CredentialUIOptionValidateUserNameSyntax
+	// CredentialUIOptionAlwaysPrompt always prompts.
 	CredentialUIOptionAlwaysPrompt
+	// CredentialUIOptionReadOnlyUserName makes username read-only.
 	CredentialUIOptionReadOnlyUserName
 )
 
@@ -149,36 +158,69 @@ func NewNullHost() *NullHost {
 	}
 }
 
-func (h *NullHost) GetName() string           { return h.name }
-func (h *NullHost) GetVersion() Version       { return h.version }
-func (h *NullHost) GetInstanceId() string     { return "00000000-0000-0000-0000-000000000000" }
+// GetName returns the host name.
+func (h *NullHost) GetName() string { return h.name }
+
+// GetVersion returns the host version.
+func (h *NullHost) GetVersion() Version { return h.version }
+
+// GetInstanceID returns the host instance ID.
+func (h *NullHost) GetInstanceID() string { return "00000000-0000-0000-0000-000000000000" }
+
+// GetCurrentCulture returns the current culture.
 func (h *NullHost) GetCurrentCulture() string { return "en-US" }
+
+// GetCurrentUICulture returns the current UI culture.
 func (h *NullHost) GetCurrentUICulture() string { return "en-US" }
-func (h *NullHost) UI() HostUI                { return &NullHostUI{} }
+
+// UI returns the host UI implementation.
+func (h *NullHost) UI() HostUI { return &NullHostUI{} }
 
 // NullHostUI provides a no-op HostUI implementation.
 type NullHostUI struct{}
 
+// ReadLine returns an empty string.
 func (ui *NullHostUI) ReadLine() (string, error) { return "", nil }
+
+// ReadLineAsSecureString returns an empty secure string.
 func (ui *NullHostUI) ReadLineAsSecureString() (*objects.SecureString, error) {
 	return objects.NewSecureString("")
 }
-func (ui *NullHostUI) Write(text string)                                    {}
-func (ui *NullHostUI) WriteLine(text string)                                {}
-func (ui *NullHostUI) WriteErrorLine(text string)                           {}
-func (ui *NullHostUI) WriteDebugLine(text string)                           {}
-func (ui *NullHostUI) WriteVerboseLine(text string)                         {}
-func (ui *NullHostUI) WriteWarningLine(text string)                         {}
-func (ui *NullHostUI) WriteProgress(sourceID int64, record *objects.ProgressRecord) {}
 
-func (ui *NullHostUI) Prompt(caption, message string, descriptions []FieldDescription) (map[string]interface{}, error) {
+// Write does nothing.
+//
+//nolint:revive // unused-parameter acceptable for null implementation
+func (ui *NullHostUI) Write(_ string) {}
+
+// WriteLine does nothing.
+func (ui *NullHostUI) WriteLine(_ string) {}
+
+// WriteErrorLine does nothing.
+func (ui *NullHostUI) WriteErrorLine(_ string) {}
+
+// WriteDebugLine does nothing.
+func (ui *NullHostUI) WriteDebugLine(_ string) {}
+
+// WriteVerboseLine does nothing.
+func (ui *NullHostUI) WriteVerboseLine(_ string) {}
+
+// WriteWarningLine does nothing.
+func (ui *NullHostUI) WriteWarningLine(_ string) {}
+
+// WriteProgress does nothing.
+func (ui *NullHostUI) WriteProgress(_ int64, _ *objects.ProgressRecord) {}
+
+// Prompt returns an empty dictionary.
+func (ui *NullHostUI) Prompt(_, _ string, descriptions []FieldDescription) (map[string]interface{}, error) {
 	return make(map[string]interface{}), nil
 }
 
-func (ui *NullHostUI) PromptForCredential(caption, message, userName, targetName string, allowedCredentialTypes CredentialTypes, options CredentialUIOptions) (*objects.PSCredential, error) {
+// PromptForCredential returns nil.
+func (ui *NullHostUI) PromptForCredential(_, _, userName, targetName string, allowedCredentialTypes CredentialTypes, options CredentialUIOptions) (*objects.PSCredential, error) {
 	return nil, nil
 }
 
-func (ui *NullHostUI) PromptForChoice(caption, message string, choices []ChoiceDescription, defaultChoice int) (int, error) {
+// PromptForChoice returns the default choice.
+func (ui *NullHostUI) PromptForChoice(_, _ string, choices []ChoiceDescription, defaultChoice int) (int, error) {
 	return defaultChoice, nil
 }

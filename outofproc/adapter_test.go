@@ -225,7 +225,7 @@ func TestAdapterCloseAckCallback(t *testing.T) {
 
 	var callbackCalled bool
 	var mu sync.Mutex
-	adapter.SetCloseAckHandler(func(GUID uuid.UUID) {
+	adapter.SetCloseAckHandler(func(_ uuid.UUID) {
 		mu.Lock()
 		defer mu.Unlock()
 		callbackCalled = true

@@ -1598,9 +1598,9 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 			if t.Name.Local == "Obj" {
 				// Store object in reference map
 				if hasRefID {
-					if hasDict && len(typeNames) > 0 && typeNames[0] == typeNameHashtable {
-						// Already handled above
-					} else {
+					// Hashtables (dictionaries) are registered during their own deserialization
+					isHashtable := hasDict && len(typeNames) > 0 && typeNames[0] == typeNameHashtable
+					if !isHashtable {
 						d.objRefs[refID] = obj
 					}
 				}
@@ -1715,7 +1715,8 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 
 	// Wrap cmds in TypedList with correct List<PSObject> TypeNames (per pypsrp/PowerShell reference)
 	// pypsrp lines 440-447: System.Collections.Generic.List`1[[System.Management.Automation.PSObject, ...]]
-	cmdsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
+	cmdsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, " +
+		"System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
 	cmdsWrapper := &TypedList{
 		TypeNames: []string{cmdsListTypeName, "System.Object"},
 		Items:     cmds,
@@ -1856,7 +1857,8 @@ func CommandToPSObject(c *objects.Command) *PSObject {
 	obj.Members["MergeDebug"] = noneEnum
 
 	// Wrap Args in TypedList with correct List<PSObject> TypeNames
-	argsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
+	argsListTypeName := "System.Collections.Generic.List`1[[System.Management.Automation.PSObject, " +
+		"System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35]]"
 	argsWrapper := &TypedList{
 		TypeNames: []string{argsListTypeName, "System.Object"},
 		Items:     params,

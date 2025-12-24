@@ -98,7 +98,9 @@ func TestPowerShellBuilder(t *testing.T) {
 
 	// Test AddParameter
 	ps.AddParameter("Id", 123)
-	if len(cmd.Parameters) != 1 { // Warning: we are checking a COPY if we accessed ps.Commands[0] before. Re-fetch.
+	//nolint:revive,staticcheck // empty block intended for commentary
+	if len(cmd.Parameters) != 1 {
+		// Warning: we are checking a COPY if we accessed ps.Commands[0] before. Re-fetch.
 		// Wait, ps.Commands[0] returns a struct copy, so 'cmd' above is a copy.
 		// logic: AddParameter modifies slice in 'ps', not 'cmd'.
 	}

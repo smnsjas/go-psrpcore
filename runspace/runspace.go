@@ -363,7 +363,7 @@ func (p *Pool) Open(ctx context.Context) error {
 
 // Close closes the runspace pool.
 // Transitions from Opened → Closing → Closed.
-func (p *Pool) Close(_ context.Context) error {
+func (p *Pool) Close(ctx context.Context) error {
 	p.mu.Lock()
 	currentState := p.state
 
@@ -383,7 +383,18 @@ func (p *Pool) Close(_ context.Context) error {
 	p.setState(StateClosing)
 	p.mu.Unlock()
 
-	// TODO: Send close messages to server
+	// Send RUNSPACEPOOL_STATE (Closed) message
+	// MS-PSRP 3.1.5.3.14: Client MUST send RUNSPACEPOOL_STATE with State=Closed(4)
+	closeData := []byte(fmt.Sprintf(
+		`<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><I32>%d</I32></Objs>`,
+		messages.RunspacePoolStateClosed))
+
+	// We ignore errors here because we are closing anyway, and the underlying transport
+	// might already be closed or broken.
+	// NewRunspacePoolStateMessage helper creates the message.
+	// Note: We ignore the second argument of NewRunspacePoolStateMessage as it's not used in header.
+	closeMsg := messages.NewRunspacePoolStateMessage(p.id, messages.RunspacePoolStateClosed, closeData)
+	_ = p.sendMessage(ctx, closeMsg)
 
 	// Transition to Closed
 	p.mu.Lock()

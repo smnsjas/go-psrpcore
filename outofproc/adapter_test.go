@@ -193,11 +193,11 @@ func TestAdapterCommandAckCallback(t *testing.T) {
 	var receivedGUID uuid.UUID
 	var callbackCalled bool
 	var mu sync.Mutex
-	adapter.SetCommandAckHandler(func(guid uuid.UUID) {
+	adapter.SetCommandAckHandler(func(GUID uuid.UUID) {
 		mu.Lock()
 		defer mu.Unlock()
 		callbackCalled = true
-		receivedGUID = guid
+		receivedGUID = GUID
 	})
 
 	// Give the read loop time to process
@@ -225,7 +225,7 @@ func TestAdapterCloseAckCallback(t *testing.T) {
 
 	var callbackCalled bool
 	var mu sync.Mutex
-	adapter.SetCloseAckHandler(func(guid uuid.UUID) {
+	adapter.SetCloseAckHandler(func(GUID uuid.UUID) {
 		mu.Lock()
 		defer mu.Unlock()
 		callbackCalled = true

@@ -16,7 +16,7 @@ type MethodID int32
 const (
 	MethodIDGetName             MethodID = 1 // Get host name
 	MethodIDGetVersion          MethodID = 2 // Get host version
-	MethodIDGetInstanceId       MethodID = 3 // Get host instance ID (GUID)
+	MethodIDGetInstanceID       MethodID = 3 // Get host instance ID (GUID)
 	MethodIDGetCurrentCulture   MethodID = 4 // Get current culture (e.g., "en-US")
 	MethodIDGetCurrentUICulture MethodID = 5 // Get current UI culture
 	MethodIDSetShouldExit       MethodID = 6 // Set exit code and exit
@@ -100,7 +100,7 @@ func (m MethodID) String() string {
 		return "GetName"
 	case MethodIDGetVersion:
 		return "GetVersion"
-	case MethodIDGetInstanceId:
+	case MethodIDGetInstanceID:
 		return "GetInstanceId"
 	case MethodIDGetCurrentCulture:
 		return "GetCurrentCulture"
@@ -268,8 +268,8 @@ func (h *CallbackHandler) HandleCall(call *RemoteHostCall) *RemoteHostResponse {
 		response.ReturnValue, err = h.handleGetName(call)
 	case MethodIDGetVersion:
 		response.ReturnValue, err = h.handleGetVersion(call)
-	case MethodIDGetInstanceId:
-		response.ReturnValue, err = h.handleGetInstanceId(call)
+	case MethodIDGetInstanceID:
+		response.ReturnValue, err = h.handleGetInstanceID(call)
 	case MethodIDGetCurrentCulture:
 		response.ReturnValue, err = h.handleGetCurrentCulture(call)
 	case MethodIDGetCurrentUICulture:
@@ -501,7 +501,7 @@ func convertToChoiceDescription(obj interface{}) (ChoiceDescription, error) {
 // handleGetName processes GetName method calls.
 // Parameters: none
 // Returns: string
-func (h *CallbackHandler) handleGetName(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handleGetName(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return "", nil
 	}
@@ -511,17 +511,17 @@ func (h *CallbackHandler) handleGetName(call *RemoteHostCall) (interface{}, erro
 // handleGetVersion processes GetVersion method calls.
 // Parameters: none
 // Returns: Version object
-func (h *CallbackHandler) handleGetVersion(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handleGetVersion(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return Version{}, nil
 	}
 	return h.host.GetVersion(), nil
 }
 
-// handleGetInstanceId processes GetInstanceId method calls.
+// handleGetInstanceID processes GetInstanceId method calls.
 // Parameters: none
 // Returns: string (GUID)
-func (h *CallbackHandler) handleGetInstanceId(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handleGetInstanceID(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return "00000000-0000-0000-0000-000000000000", nil
 	}
@@ -531,7 +531,7 @@ func (h *CallbackHandler) handleGetInstanceId(call *RemoteHostCall) (interface{}
 // handleGetCurrentCulture processes GetCurrentCulture method calls.
 // Parameters: none
 // Returns: string (e.g., "en-US")
-func (h *CallbackHandler) handleGetCurrentCulture(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handleGetCurrentCulture(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return "en-US", nil
 	}
@@ -541,7 +541,7 @@ func (h *CallbackHandler) handleGetCurrentCulture(call *RemoteHostCall) (interfa
 // handleGetCurrentUICulture processes GetCurrentUICulture method calls.
 // Parameters: none
 // Returns: string (e.g., "en-US")
-func (h *CallbackHandler) handleGetCurrentUICulture(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handleGetCurrentUICulture(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return "en-US", nil
 	}
@@ -551,7 +551,7 @@ func (h *CallbackHandler) handleGetCurrentUICulture(call *RemoteHostCall) (inter
 // handleSetShouldExit processes SetShouldExit method calls.
 // Parameters: [0] int32 (exit code)
 // Returns: none
-func (h *CallbackHandler) handleSetShouldExit(call *RemoteHostCall) error {
+func (h *CallbackHandler) handleSetShouldExit(_ *RemoteHostCall) error {
 	// This is a signal to the host that PowerShell wants to exit
 	// We don't implement this in the basic host, but advanced hosts could handle it
 	return nil
@@ -560,7 +560,7 @@ func (h *CallbackHandler) handleSetShouldExit(call *RemoteHostCall) error {
 // handleEnterNestedPrompt processes EnterNestedPrompt method calls.
 // Parameters: none
 // Returns: none
-func (h *CallbackHandler) handleEnterNestedPrompt(call *RemoteHostCall) error {
+func (h *CallbackHandler) handleEnterNestedPrompt(_ *RemoteHostCall) error {
 	// Nested prompts are for interactive debugging scenarios
 	// Not implemented in basic host
 	return fmt.Errorf("EnterNestedPrompt not supported")
@@ -569,7 +569,7 @@ func (h *CallbackHandler) handleEnterNestedPrompt(call *RemoteHostCall) error {
 // handleExitNestedPrompt processes ExitNestedPrompt method calls.
 // Parameters: none
 // Returns: none
-func (h *CallbackHandler) handleExitNestedPrompt(call *RemoteHostCall) error {
+func (h *CallbackHandler) handleExitNestedPrompt(_ *RemoteHostCall) error {
 	// Nested prompts are for interactive debugging scenarios
 	// Not implemented in basic host
 	return fmt.Errorf("ExitNestedPrompt not supported")
@@ -580,7 +580,7 @@ func (h *CallbackHandler) handleExitNestedPrompt(call *RemoteHostCall) error {
 // handleNotifyBeginApplication processes NotifyBeginApplication method calls.
 // Parameters: none
 // Returns: none
-func (h *CallbackHandler) handleNotifyBeginApplication(call *RemoteHostCall) error {
+func (h *CallbackHandler) handleNotifyBeginApplication(_ *RemoteHostCall) error {
 	// Notification that an external application is starting
 	// Most hosts can ignore this
 	return nil
@@ -589,7 +589,7 @@ func (h *CallbackHandler) handleNotifyBeginApplication(call *RemoteHostCall) err
 // handleNotifyEndApplication processes NotifyEndApplication method calls.
 // Parameters: none
 // Returns: none
-func (h *CallbackHandler) handleNotifyEndApplication(call *RemoteHostCall) error {
+func (h *CallbackHandler) handleNotifyEndApplication(_ *RemoteHostCall) error {
 	// Notification that an external application has ended
 	// Most hosts can ignore this
 	return nil
@@ -600,7 +600,7 @@ func (h *CallbackHandler) handleNotifyEndApplication(call *RemoteHostCall) error
 // handleReadLine processes ReadLine method calls.
 // Parameters: none
 // Returns: string
-func (h *CallbackHandler) handleReadLine(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handleReadLine(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil || h.host.UI() == nil {
 		return "", nil
 	}
@@ -610,7 +610,7 @@ func (h *CallbackHandler) handleReadLine(call *RemoteHostCall) (interface{}, err
 // handleReadLineAsSecureString processes ReadLineAsSecureString method calls.
 // Parameters: none
 // Returns: *objects.SecureString
-func (h *CallbackHandler) handleReadLineAsSecureString(call *RemoteHostCall) (interface{}, error) {
+func (h *CallbackHandler) handleReadLineAsSecureString(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil || h.host.UI() == nil {
 		return objects.NewSecureString("")
 	}
@@ -656,7 +656,7 @@ func (h *CallbackHandler) handleWrite2(call *RemoteHostCall) error {
 // handleWriteLine1 processes WriteLine1 method calls.
 // Parameters: none
 // Returns: none
-func (h *CallbackHandler) handleWriteLine1(call *RemoteHostCall) error {
+func (h *CallbackHandler) handleWriteLine1(_ *RemoteHostCall) error {
 	if h.host != nil && h.host.UI() != nil {
 		h.host.UI().WriteLine("")
 	}
@@ -733,23 +733,23 @@ func (h *CallbackHandler) handleWriteDebugLine(call *RemoteHostCall) error {
 }
 
 // handleWriteProgress processes WriteProgress method calls.
-// Parameters: [0] int64 (sourceId), [1] ProgressRecord
+// Parameters: [0] int64 (sourceID), [1] ProgressRecord
 // Returns: none
 func (h *CallbackHandler) handleWriteProgress(call *RemoteHostCall) error {
 	if len(call.MethodParameters) < 2 {
 		return fmt.Errorf("WriteProgress requires 2 parameters, got %d", len(call.MethodParameters))
 	}
 
-	var sourceId int64
+	var sourceID int64
 	switch v := call.MethodParameters[0].(type) {
 	case int:
-		sourceId = int64(v)
+		sourceID = int64(v)
 	case int32:
-		sourceId = int64(v)
+		sourceID = int64(v)
 	case int64:
-		sourceId = v
+		sourceID = v
 	default:
-		return fmt.Errorf("WriteProgress sourceId must be int, got %T", call.MethodParameters[0])
+		return fmt.Errorf("WriteProgress sourceID must be int, got %T", call.MethodParameters[0])
 	}
 
 	// Convert PSObject parameter to ProgressRecord
@@ -758,13 +758,13 @@ func (h *CallbackHandler) handleWriteProgress(call *RemoteHostCall) error {
 		// Progress is informational - don't fail the callback on conversion errors.
 		// Pass nil to maintain backwards compatibility with hosts that may not handle it.
 		if h.host != nil && h.host.UI() != nil {
-			h.host.UI().WriteProgress(sourceId, nil)
+			h.host.UI().WriteProgress(sourceID, nil)
 		}
 		return nil
 	}
 
 	if h.host != nil && h.host.UI() != nil {
-		h.host.UI().WriteProgress(sourceId, record)
+		h.host.UI().WriteProgress(sourceID, record)
 	}
 	return nil
 }

@@ -101,10 +101,7 @@ func FuzzUUIDConversion(f *testing.F) {
 		}
 
 		// Convert to little-endian and back
-		leBytes, err := uuidToLittleEndianBytes(original)
-		if err != nil {
-			t.Fatalf("uuidToLittleEndianBytes failed: %v", err)
-		}
+		leBytes := uuidToLittleEndianBytes(original)
 
 		recovered, err := uuidFromLittleEndianBytes(leBytes)
 		if err != nil {

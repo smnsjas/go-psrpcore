@@ -537,7 +537,7 @@ func (h *CallbackHandler) handleGetInstanceID(_ *RemoteHostCall) (interface{}, e
 	if h.host == nil {
 		return "00000000-0000-0000-0000-000000000000", nil
 	}
-	return h.host.GetInstanceId(), nil
+	return h.host.GetInstanceID(), nil
 }
 
 // handleGetCurrentCulture processes GetCurrentCulture method calls.

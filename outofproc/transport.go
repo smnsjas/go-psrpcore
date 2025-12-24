@@ -30,14 +30,22 @@ var NullGUID = uuid.UUID{}
 type PacketType string
 
 const (
-	PacketTypeData       PacketType = "Data"
-	PacketTypeDataAck    PacketType = "DataAck"
-	PacketTypeCommand    PacketType = "Command"
+	// PacketTypeData represents a data packet containing a PSRP fragment.
+	PacketTypeData PacketType = "Data"
+	// PacketTypeDataAck represents an acknowledgment for a data packet.
+	PacketTypeDataAck PacketType = "DataAck"
+	// PacketTypeCommand represents a command packet (pipeline creation).
+	PacketTypeCommand PacketType = "Command"
+	// PacketTypeCommandAck represents an acknowledgment for a command packet.
 	PacketTypeCommandAck PacketType = "CommandAck"
-	PacketTypeClose      PacketType = "Close"
-	PacketTypeCloseAck   PacketType = "CloseAck"
-	PacketTypeSignal     PacketType = "Signal"
-	PacketTypeSignalAck  PacketType = "SignalAck"
+	// PacketTypeClose represents a close signal.
+	PacketTypeClose PacketType = "Close"
+	// PacketTypeCloseAck represents an acknowledgment for a close signal.
+	PacketTypeCloseAck PacketType = "CloseAck"
+	// PacketTypeSignal represents a signal (e.g., stop).
+	PacketTypeSignal PacketType = "Signal"
+	// PacketTypeSignalAck represents an acknowledgment for a signal.
+	PacketTypeSignalAck PacketType = "SignalAck"
 )
 
 // Packet represents a received packet from the OutOfProcess protocol.

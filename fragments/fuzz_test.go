@@ -24,7 +24,7 @@ func FuzzDecode(f *testing.F) {
 	f.Add([]byte{})                   // Empty
 	f.Add([]byte{0xFF, 0xFF, 0xFF})   // Random garbage
 
-	f.Fuzz(func(t *testing.T, data []byte) {
+	f.Fuzz(func(_ *testing.T, data []byte) {
 		// The decoder must not panic on any input
 		_, _ = Decode(data)
 	})
@@ -94,7 +94,7 @@ func FuzzAssemblerAdd(f *testing.F) {
 	}
 	f.Add(validFrag.Encode())
 
-	f.Fuzz(func(t *testing.T, data []byte) {
+	f.Fuzz(func(_ *testing.T, data []byte) {
 		// Decode the fragment (may fail - that's OK)
 		frag, err := Decode(data)
 		if err != nil {

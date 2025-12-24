@@ -15,7 +15,7 @@ import (
 // the OutOfProcess framing protocol internally.
 type Adapter struct {
 	transport    *Transport
-	runspaceGuid uuid.UUID
+	runspaceGUID uuid.UUID
 
 	// Read state
 	readBuf  bytes.Buffer
@@ -33,19 +33,19 @@ type Adapter struct {
 
 	// Callbacks for non-data packets (protected by handlerMu)
 	handlerMu    sync.RWMutex
-	onCommandAck func(pipelineGuid uuid.UUID)
+	onCommandAck func(pipelineGUID uuid.UUID)
 	onCloseAck   func(psGuid uuid.UUID)
 	onSignalAck  func(psGuid uuid.UUID)
 }
 
 // NewAdapter creates an adapter for a specific runspace.
 // The adapter handles the OutOfProcess framing and provides raw fragment I/O.
-func NewAdapter(transport *Transport, runspaceGuid uuid.UUID) *Adapter {
+func NewAdapter(transport *Transport, runspaceGUID uuid.UUID) *Adapter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	a := &Adapter{
 		transport:    transport,
-		runspaceGuid: runspaceGuid,
+		runspaceGUID: runspaceGUID,
 		pending:      make([][]byte, 0, 16),
 		ctx:          ctx,
 		cancel:       cancel,
@@ -59,7 +59,7 @@ func NewAdapter(transport *Transport, runspaceGuid uuid.UUID) *Adapter {
 }
 
 // SetCommandAckHandler sets a callback for CommandAck packets.
-func (a *Adapter) SetCommandAckHandler(handler func(pipelineGuid uuid.UUID)) {
+func (a *Adapter) SetCommandAckHandler(handler func(pipelineGUID uuid.UUID)) {
 	a.handlerMu.Lock()
 	defer a.handlerMu.Unlock()
 	a.onCommandAck = handler
@@ -206,18 +206,18 @@ func (a *Adapter) Write(p []byte) (int, error) {
 }
 
 // SendCommand sends a Command packet for pipeline creation.
-func (a *Adapter) SendCommand(pipelineGuid uuid.UUID) error {
-	return a.transport.SendCommand(pipelineGuid)
+func (a *Adapter) SendCommand(pipelineGUID uuid.UUID) error {
+	return a.transport.SendCommand(pipelineGUID)
 }
 
 // SendPipelineData sends fragment data for a specific pipeline.
-func (a *Adapter) SendPipelineData(pipelineGuid uuid.UUID, data []byte) error {
-	return a.transport.SendData(pipelineGuid, data)
+func (a *Adapter) SendPipelineData(pipelineGUID uuid.UUID, data []byte) error {
+	return a.transport.SendData(pipelineGUID, data)
 }
 
 // SendSignal sends a signal to a pipeline.
-func (a *Adapter) SendSignal(pipelineGuid uuid.UUID) error {
-	return a.transport.SendSignal(pipelineGuid)
+func (a *Adapter) SendSignal(pipelineGUID uuid.UUID) error {
+	return a.transport.SendSignal(pipelineGUID)
 }
 
 // Close shuts down the adapter.

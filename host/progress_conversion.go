@@ -24,15 +24,15 @@ func convertToProgressRecord(obj interface{}) (*objects.ProgressRecord, error) {
 	record := &objects.ProgressRecord{}
 
 	// Extract ActivityId (required)
-	if activityId, ok := props["ActivityId"].(int32); ok {
-		record.ActivityId = int(activityId)
+	if activityID, ok := props["ActivityId"].(int32); ok {
+		record.ActivityID = int(activityID)
 	}
 
 	// Extract ParentActivityId (optional, default -1)
-	if parentActivityId, ok := props["ParentActivityId"].(int32); ok {
-		record.ParentActivityId = int(parentActivityId)
+	if parentActivityID, ok := props["ParentActivityId"].(int32); ok {
+		record.ParentActivityID = int(parentActivityID)
 	} else {
-		record.ParentActivityId = -1
+		record.ParentActivityID = -1
 	}
 
 	// Extract Activity (required)

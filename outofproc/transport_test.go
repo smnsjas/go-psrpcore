@@ -14,28 +14,28 @@ func TestParseDataPacket(t *testing.T) {
 		name     string
 		input    string
 		wantType PacketType
-		wantGuid string
+		wantGUID string
 		wantData string
 	}{
 		{
 			name:     "data packet with content",
 			input:    "<Data Stream='Default' PSGuid='00000000-0000-0000-0000-000000000000'>SGVsbG8gV29ybGQ=</Data>",
 			wantType: PacketTypeData,
-			wantGuid: "00000000-0000-0000-0000-000000000000",
+			wantGUID: "00000000-0000-0000-0000-000000000000",
 			wantData: "Hello World",
 		},
 		{
 			name:     "data packet with pipeline guid",
 			input:    "<Data Stream='Default' PSGuid='12345678-1234-1234-1234-123456789abc'>dGVzdA==</Data>",
 			wantType: PacketTypeData,
-			wantGuid: "12345678-1234-1234-1234-123456789abc",
+			wantGUID: "12345678-1234-1234-1234-123456789abc",
 			wantData: "test",
 		},
 		{
 			name:     "data packet with prompt response stream",
 			input:    "<Data Stream='PromptResponse' PSGuid='00000000-0000-0000-0000-000000000000'>YWJj</Data>",
 			wantType: PacketTypeData,
-			wantGuid: "00000000-0000-0000-0000-000000000000",
+			wantGUID: "00000000-0000-0000-0000-000000000000",
 			wantData: "abc",
 		},
 	}
@@ -51,8 +51,8 @@ func TestParseDataPacket(t *testing.T) {
 				t.Errorf("Type = %v, want %v", packet.Type, tt.wantType)
 			}
 
-			if packet.PSGuid.String() != tt.wantGuid {
-				t.Errorf("PSGuid = %v, want %v", packet.PSGuid, tt.wantGuid)
+			if packet.PSGuid.String() != tt.wantGUID {
+				t.Errorf("PSGuid = %v, want %v", packet.PSGuid, tt.wantGUID)
 			}
 
 			if string(packet.Data) != tt.wantData {
@@ -67,31 +67,31 @@ func TestParseAckPackets(t *testing.T) {
 		name     string
 		input    string
 		wantType PacketType
-		wantGuid string
+		wantGUID string
 	}{
 		{
 			name:     "data ack",
 			input:    "<DataAck PSGuid='00000000-0000-0000-0000-000000000000' />",
 			wantType: PacketTypeDataAck,
-			wantGuid: "00000000-0000-0000-0000-000000000000",
+			wantGUID: "00000000-0000-0000-0000-000000000000",
 		},
 		{
 			name:     "command ack",
 			input:    "<CommandAck PSGuid='12345678-1234-1234-1234-123456789abc' />",
 			wantType: PacketTypeCommandAck,
-			wantGuid: "12345678-1234-1234-1234-123456789abc",
+			wantGUID: "12345678-1234-1234-1234-123456789abc",
 		},
 		{
 			name:     "close ack",
 			input:    "<CloseAck PSGuid='00000000-0000-0000-0000-000000000000' />",
 			wantType: PacketTypeCloseAck,
-			wantGuid: "00000000-0000-0000-0000-000000000000",
+			wantGUID: "00000000-0000-0000-0000-000000000000",
 		},
 		{
 			name:     "signal ack",
 			input:    "<SignalAck PSGuid='abcdef12-3456-7890-abcd-ef1234567890' />",
 			wantType: PacketTypeSignalAck,
-			wantGuid: "abcdef12-3456-7890-abcd-ef1234567890",
+			wantGUID: "abcdef12-3456-7890-abcd-ef1234567890",
 		},
 	}
 
@@ -106,8 +106,8 @@ func TestParseAckPackets(t *testing.T) {
 				t.Errorf("Type = %v, want %v", packet.Type, tt.wantType)
 			}
 
-			if packet.PSGuid.String() != tt.wantGuid {
-				t.Errorf("PSGuid = %v, want %v", packet.PSGuid, tt.wantGuid)
+			if packet.PSGuid.String() != tt.wantGUID {
+				t.Errorf("PSGuid = %v, want %v", packet.PSGuid, tt.wantGUID)
 			}
 		})
 	}
@@ -117,8 +117,8 @@ func TestSendData(t *testing.T) {
 	var buf bytes.Buffer
 	transport := NewTransport(strings.NewReader(""), &buf)
 
-	testGuid := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
-	err := transport.SendData(testGuid, []byte("Hello World"))
+	testGUID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+	err := transport.SendData(testGUID, []byte("Hello World"))
 	if err != nil {
 		t.Fatalf("SendData() error = %v", err)
 	}
@@ -142,8 +142,8 @@ func TestSendCommand(t *testing.T) {
 	var buf bytes.Buffer
 	transport := NewTransport(strings.NewReader(""), &buf)
 
-	testGuid := uuid.MustParse("abcdef12-3456-7890-abcd-ef1234567890")
-	err := transport.SendCommand(testGuid)
+	testGUID := uuid.MustParse("abcdef12-3456-7890-abcd-ef1234567890")
+	err := transport.SendCommand(testGUID)
 	if err != nil {
 		t.Fatalf("SendCommand() error = %v", err)
 	}
@@ -175,8 +175,8 @@ func TestSendSignal(t *testing.T) {
 	var buf bytes.Buffer
 	transport := NewTransport(strings.NewReader(""), &buf)
 
-	testGuid := uuid.MustParse("11111111-2222-3333-4444-555555555555")
-	err := transport.SendSignal(testGuid)
+	testGUID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+	err := transport.SendSignal(testGUID)
 	if err != nil {
 		t.Fatalf("SendSignal() error = %v", err)
 	}
@@ -257,12 +257,12 @@ func TestRoundTrip(t *testing.T) {
 	serverTransport := NewTransport(strings.NewReader(""), pw)
 	clientTransport := NewTransport(pr, io.Discard)
 
-	testGuid := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+	testGUID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
 	testData := []byte("Hello, PSRP!")
 
 	// Send in a goroutine
 	go func() {
-		if err := serverTransport.SendData(testGuid, testData); err != nil {
+		if err := serverTransport.SendData(testGUID, testData); err != nil {
 			t.Errorf("SendData() error = %v", err)
 		}
 		pw.Close()
@@ -277,8 +277,8 @@ func TestRoundTrip(t *testing.T) {
 	if packet.Type != PacketTypeData {
 		t.Errorf("Type = %v, want %v", packet.Type, PacketTypeData)
 	}
-	if packet.PSGuid != testGuid {
-		t.Errorf("PSGuid = %v, want %v", packet.PSGuid, testGuid)
+	if packet.PSGuid != testGUID {
+		t.Errorf("PSGuid = %v, want %v", packet.PSGuid, testGUID)
 	}
 	if !bytes.Equal(packet.Data, testData) {
 		t.Errorf("Data = %q, want %q", packet.Data, testData)
@@ -290,9 +290,9 @@ func TestIsSessionGUID(t *testing.T) {
 		t.Error("IsSessionGUID(NullGUID) = false, want true")
 	}
 
-	randomGuid := uuid.New()
-	if IsSessionGUID(randomGuid) {
-		t.Error("IsSessionGUID(randomGuid) = true, want false")
+	randomGUID := uuid.New()
+	if IsSessionGUID(randomGUID) {
+		t.Error("IsSessionGUID(randomGUID) = true, want false")
 	}
 }
 

@@ -749,8 +749,8 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 	}
 
 	// FullyQualifiedErrorId
-	if err.FullyQualifiedErrorId != "" {
-		props["FullyQualifiedErrorId"] = err.FullyQualifiedErrorId
+	if err.FullyQualifiedErrorID != "" {
+		props["FullyQualifiedErrorId"] = err.FullyQualifiedErrorID
 	}
 
 	// InvocationInfo
@@ -805,8 +805,8 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 func ProgressRecordToPSObject(record *objects.ProgressRecord) *PSObject {
 	props := make(map[string]interface{})
 
-	props["ActivityId"] = safeInt32(record.ActivityId)
-	props["ParentActivityId"] = safeInt32(record.ParentActivityId)
+	props["ActivityId"] = safeInt32(record.ActivityID)
+	props["ParentActivityId"] = safeInt32(record.ParentActivityID)
 	props["Activity"] = record.Activity
 	props["StatusDescription"] = record.StatusDescription
 	props["CurrentOperation"] = record.CurrentOperation

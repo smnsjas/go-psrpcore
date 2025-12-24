@@ -215,18 +215,11 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 	// Serialize the PowerShell object to CLIXML
 	serializer := serialization.NewSerializer()
 	defer serializer.Close()
-	// DEBUG TEST: Load payload from file instead of serializing
 	cmdData, err := serializer.SerializeRaw(p.powerShell)
 	if err != nil {
 		p.transition(StateFailed, err)
 		return fmt.Errorf("serialize command: %w", err)
 	}
-
-	// Remove newlines? pypsrp generally sends it compact?
-	// XML parser usually ignores whitespace but let's send exactly what we have.
-
-	// DEBUG: Print the actual serialized data
-	fmt.Printf("DEBUG CreatePipeline data (%d bytes) FROM PYPSRP:\n%s\n", len(cmdData), string(cmdData))
 
 	msg := messages.NewCreatePipeline(p.runspaceID, p.id, cmdData)
 	if err := p.transport.SendMessage(ctx, msg); err != nil {

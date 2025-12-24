@@ -30,8 +30,8 @@ func TestConvertToProgressRecord(t *testing.T) {
 				},
 			},
 			want: &objects.ProgressRecord{
-				ActivityId:        1,
-				ParentActivityId:  0,
+				ActivityID:        1,
+				ParentActivityID:  0,
 				Activity:          "Installing modules",
 				StatusDescription: "Module 3 of 10",
 				CurrentOperation:  "Downloading Az.Accounts",
@@ -48,8 +48,8 @@ func TestConvertToProgressRecord(t *testing.T) {
 				"Activity":   "Test Progress",
 			},
 			want: &objects.ProgressRecord{
-				ActivityId:       5,
-				ParentActivityId: -1,
+				ActivityID:       5,
+				ParentActivityID: -1,
 				Activity:         "Test Progress",
 				PercentComplete:  -1,
 				SecondsRemaining: -1,
@@ -68,8 +68,8 @@ func TestConvertToProgressRecord(t *testing.T) {
 				},
 			},
 			want: &objects.ProgressRecord{
-				ActivityId:       10,
-				ParentActivityId: -1,
+				ActivityID:       10,
+				ParentActivityID: -1,
 				Activity:         "Deployment",
 				PercentComplete:  100,
 				SecondsRemaining: -1,
@@ -96,11 +96,11 @@ func TestConvertToProgressRecord(t *testing.T) {
 				return
 			}
 
-			if got.ActivityId != tt.want.ActivityId {
-				t.Errorf("ActivityId = %d, want %d", got.ActivityId, tt.want.ActivityId)
+			if got.ActivityID != tt.want.ActivityID {
+				t.Errorf("ActivityId = %d, want %d", got.ActivityID, tt.want.ActivityID)
 			}
-			if got.ParentActivityId != tt.want.ParentActivityId {
-				t.Errorf("ParentActivityId = %d, want %d", got.ParentActivityId, tt.want.ParentActivityId)
+			if got.ParentActivityID != tt.want.ParentActivityID {
+				t.Errorf("ParentActivityId = %d, want %d", got.ParentActivityID, tt.want.ParentActivityID)
 			}
 			if got.Activity != tt.want.Activity {
 				t.Errorf("Activity = %q, want %q", got.Activity, tt.want.Activity)

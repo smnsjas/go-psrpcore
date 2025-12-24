@@ -8,8 +8,8 @@ import (
 
 func TestProgressRecordRoundTrip(t *testing.T) {
 	original := &objects.ProgressRecord{
-		ActivityId:        10,
-		ParentActivityId:  5,
+		ActivityID:        10,
+		ParentActivityID:  5,
 		Activity:          "Deploying application",
 		StatusDescription: "Step 2/5",
 		CurrentOperation:  "Uploading files",
@@ -74,8 +74,8 @@ func TestProgressRecordRoundTrip(t *testing.T) {
 
 func TestProgressRecordToPSObject(t *testing.T) {
 	record := &objects.ProgressRecord{
-		ActivityId:        1,
-		ParentActivityId:  0,
+		ActivityID:        1,
+		ParentActivityID:  0,
 		Activity:          "Test",
 		StatusDescription: "Testing",
 		CurrentOperation:  "Running tests",

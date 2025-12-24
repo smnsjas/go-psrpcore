@@ -195,17 +195,11 @@ func (m *Message) Encode() ([]byte, error) {
 	binary.LittleEndian.PutUint32(buf[4:8], uint32(m.Type))
 
 	// RunspacePool ID (16 bytes, .NET GUID format) - MS-PSRP 2.2.1
-	rpidBytes, err := uuidToLittleEndianBytes(m.RunspaceID)
-	if err != nil {
-		return nil, fmt.Errorf("encode RPID: %w", err)
-	}
+	rpidBytes := uuidToLittleEndianBytes(m.RunspaceID)
 	copy(buf[8:24], rpidBytes)
 
 	// Pipeline ID (16 bytes, .NET GUID format) - MS-PSRP 2.2.1
-	pidBytes, err := uuidToLittleEndianBytes(m.PipelineID)
-	if err != nil {
-		return nil, fmt.Errorf("encode PID: %w", err)
-	}
+	pidBytes := uuidToLittleEndianBytes(m.PipelineID)
 	copy(buf[24:40], pidBytes)
 
 	// Data (variable length, CLIXML encoded)
@@ -256,7 +250,7 @@ func Decode(data []byte) (*Message, error) {
 // uuidToLittleEndianBytes converts a UUID to little-endian byte representation.
 // .NET stores GUIDs in little-endian format, so we need to swap the byte order
 // for the first three components while keeping the last two as-is.
-func uuidToLittleEndianBytes(u uuid.UUID) ([]byte, error) {
+func uuidToLittleEndianBytes(u uuid.UUID) []byte {
 	b := make([]byte, 16)
 	ub := u[:]
 
@@ -272,7 +266,7 @@ func uuidToLittleEndianBytes(u uuid.UUID) ([]byte, error) {
 	// Clock-seq and node (8 bytes) - keep as-is (already in correct order)
 	copy(b[8:], ub[8:])
 
-	return b, nil
+	return b
 }
 
 // uuidFromLittleEndianBytes converts little-endian bytes to a UUID.
@@ -339,7 +333,7 @@ const (
 )
 
 // NewRunspacePoolStateMessage creates a RUNSPACEPOOL_STATE message.
-func NewRunspacePoolStateMessage(runspaceID uuid.UUID, state RunspacePoolState, data []byte) *Message {
+func NewRunspacePoolStateMessage(runspaceID uuid.UUID, _ RunspacePoolState, data []byte) *Message {
 	return &Message{
 		Destination: DestinationClient,
 		Type:        MessageTypeRunspacePoolState,
@@ -412,7 +406,7 @@ const (
 )
 
 // NewPipelineState creates a PIPELINE_STATE message.
-func NewPipelineState(runspaceID, pipelineID uuid.UUID, state PipelineState, data []byte) *Message {
+func NewPipelineState(runspaceID, pipelineID uuid.UUID, _ PipelineState, data []byte) *Message {
 	return &Message{
 		Destination: DestinationClient,
 		Type:        MessageTypePipelineState,

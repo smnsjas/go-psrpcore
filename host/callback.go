@@ -507,6 +507,8 @@ func convertToChoiceDescription(obj interface{}) (ChoiceDescription, error) {
 // handleGetName processes GetName method calls.
 // Parameters: none
 // Returns: string
+//
+//nolint:unparam // check is required by interface
 func (h *CallbackHandler) handleGetName(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return "", nil
@@ -517,6 +519,8 @@ func (h *CallbackHandler) handleGetName(_ *RemoteHostCall) (interface{}, error) 
 // handleGetVersion processes GetVersion method calls.
 // Parameters: none
 // Returns: Version object
+//
+//nolint:unparam // check is required by interface
 func (h *CallbackHandler) handleGetVersion(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return Version{}, nil
@@ -527,6 +531,8 @@ func (h *CallbackHandler) handleGetVersion(_ *RemoteHostCall) (interface{}, erro
 // handleGetInstanceID processes GetInstanceId method calls.
 // Parameters: none
 // Returns: string (GUID)
+//
+//nolint:unparam // check is required by interface
 func (h *CallbackHandler) handleGetInstanceID(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return "00000000-0000-0000-0000-000000000000", nil
@@ -537,6 +543,8 @@ func (h *CallbackHandler) handleGetInstanceID(_ *RemoteHostCall) (interface{}, e
 // handleGetCurrentCulture processes GetCurrentCulture method calls.
 // Parameters: none
 // Returns: string (e.g., "en-US")
+//
+//nolint:unparam // check is required by interface
 func (h *CallbackHandler) handleGetCurrentCulture(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return DefaultCulture, nil
@@ -547,6 +555,8 @@ func (h *CallbackHandler) handleGetCurrentCulture(_ *RemoteHostCall) (interface{
 // handleGetCurrentUICulture processes GetCurrentUICulture method calls.
 // Parameters: none
 // Returns: string (e.g., "en-US")
+//
+//nolint:unparam // check is required by interface
 func (h *CallbackHandler) handleGetCurrentUICulture(_ *RemoteHostCall) (interface{}, error) {
 	if h.host == nil {
 		return DefaultCulture, nil
@@ -662,6 +672,8 @@ func (h *CallbackHandler) handleWrite2(call *RemoteHostCall) error {
 // handleWriteLine1 processes WriteLine1 method calls.
 // Parameters: none
 // Returns: none
+//
+//nolint:unparam // strict signature required
 func (h *CallbackHandler) handleWriteLine1(_ *RemoteHostCall) error {
 	if h.host != nil && h.host.UI() != nil {
 		h.host.UI().WriteLine("")

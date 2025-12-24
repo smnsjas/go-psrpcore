@@ -11,7 +11,7 @@ func FuzzDeserializer(f *testing.F) {
 	f.Add([]byte(`<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><I32>123</I32></Objs>`))
 	f.Add([]byte("garbage data"))
 
-	f.Fuzz(func(t *testing.T, data []byte) {
+	f.Fuzz(func(_ *testing.T, data []byte) {
 		d := NewDeserializer()
 		// We expect errors for garbage input, but we must NOT panic.
 		// The deserializer should handle invalid XML, deep nesting, etc. safely.

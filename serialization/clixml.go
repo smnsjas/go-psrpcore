@@ -865,14 +865,28 @@ func (s *Serializer) serializeGenericMap(m map[interface{}]interface{}, name str
 
 	s.buf.WriteString("<DCT>")
 
+	// Extract and sort keys for deterministic output
+	type kvPair struct {
+		key   interface{}
+		value interface{}
+	}
+	pairs := make([]kvPair, 0, len(m))
 	for k, v := range m {
+		pairs = append(pairs, kvPair{key: k, value: v})
+	}
+	// Sort by string representation of keys
+	sort.Slice(pairs, func(i, j int) bool {
+		return fmt.Sprintf("%v", pairs[i].key) < fmt.Sprintf("%v", pairs[j].key)
+	})
+
+	for _, kv := range pairs {
 		s.buf.WriteString("<En>")
 		// Key (Name is empty string because it's a dictionary entry key, not a property)
-		if err := s.serializeValueWithName(k, "Key"); err != nil {
+		if err := s.serializeValueWithName(kv.key, "Key"); err != nil {
 			return fmt.Errorf("serialize map key: %w", err)
 		}
 		// Value
-		if err := s.serializeValueWithName(v, "Value"); err != nil {
+		if err := s.serializeValueWithName(kv.value, "Value"); err != nil {
 			return fmt.Errorf("serialize map value: %w", err)
 		}
 		s.buf.WriteString("</En>")
@@ -1028,20 +1042,32 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 		s.buf.WriteString("</TN>")
 	}
 
-	// Serialize dictionary entries
+	// Serialize dictionary entries with sorted keys for deterministic output
 	s.buf.WriteString("<DCT>")
-	for k, v := range m {
+
+	keys := keySlicePool.Get().([]string)
+	keys = keys[:0]
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		v := m[k]
 		s.buf.WriteString("<En>")
 		s.buf.WriteString("<S N=\"Key\">")
 		if err := xml.EscapeText(&s.buf, []byte(k)); err != nil {
+			keySlicePool.Put(keys)
 			return fmt.Errorf("escape dict key: %w", err)
 		}
 		s.buf.WriteString("</S>")
 		if err := s.serializeValueWithName(v, "Value"); err != nil {
+			keySlicePool.Put(keys)
 			return fmt.Errorf("serialize dict value for key %s: %w", k, err)
 		}
 		s.buf.WriteString("</En>")
 	}
+	keySlicePool.Put(keys)
 	s.buf.WriteString("</DCT>")
 
 	s.buf.WriteString("</Obj>")

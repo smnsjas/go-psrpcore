@@ -110,6 +110,17 @@ const (
 	StateBroken
 )
 
+const (
+	// DefaultMaxFragmentSize is the default maximum size for PSRP message fragments.
+	// MS-PSRP recommends 32KB (32768 bytes) as a reasonable default.
+	DefaultMaxFragmentSize = 32768
+
+	// DefaultMaxConcurrentHostCalls limits the number of concurrent host callback
+	// operations that can be processed. This prevents resource exhaustion under
+	// heavy callback load.
+	DefaultMaxConcurrentHostCalls = 64
+)
+
 // String returns a string representation of the state.
 func (s State) String() string {
 	switch s {
@@ -197,8 +208,8 @@ func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 		host:                defaultHost,
 		hostCallbackHandler: host.NewCallbackHandler(defaultHost),
 		metadataCh:          make(chan *messages.Message, 1),
-		hostCallLimiter:     make(chan struct{}, 64),        // Limit concurrent host calls
-		fragmenter:          fragments.NewFragmenter(32768), // Default max fragment size
+		hostCallLimiter:     make(chan struct{}, DefaultMaxConcurrentHostCalls),
+		fragmenter:          fragments.NewFragmenter(DefaultMaxFragmentSize),
 		assembler:           fragments.NewAssembler(),
 		stateCh:             make(chan State, 1),
 		outgoingCh:          make(chan *messages.Message, 100),
@@ -651,8 +662,14 @@ func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 	}
 
 	// Start a monitoring goroutine to remove the pipeline when it's done
+	// Also listens to pool's done channel to avoid goroutine leak if pool is closed
 	go func() {
-		_ = pl.Wait() // Wait for completion
+		select {
+		case <-pl.Done():
+			// Pipeline completed normally
+		case <-p.doneCh:
+			// Pool was closed/broken
+		}
 		p.removePipeline(pl.ID())
 	}()
 

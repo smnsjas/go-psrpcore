@@ -497,9 +497,9 @@ func TestDispatchLoopTransportError(t *testing.T) {
 	go func() {
 		// Read and discard SESSION_CAPABILITY from client
 		header := make([]byte, fragments.HeaderSize)
-		io.ReadFull(serverReader, header)
+		_, _ = io.ReadFull(serverReader, header)
 		blobLen := binary.BigEndian.Uint32(header[17:21])
-		io.ReadFull(serverReader, make([]byte, blobLen))
+		_, _ = io.ReadFull(serverReader, make([]byte, blobLen))
 
 		// Send SESSION_CAPABILITY response
 		capabilityData := []byte(`<?xml version="1.0" encoding="utf-8"?>
@@ -516,12 +516,12 @@ func TestDispatchLoopTransportError(t *testing.T) {
 			RunspaceID:  poolID,
 			Data:        capabilityData,
 		}
-		sendServerMessage(capMsg)
+		_ = sendServerMessage(capMsg)
 
 		// Read and discard INIT_RUNSPACEPOOL from client
-		io.ReadFull(serverReader, header)
+		_, _ = io.ReadFull(serverReader, header)
 		blobLen = binary.BigEndian.Uint32(header[17:21])
-		io.ReadFull(serverReader, make([]byte, blobLen))
+		_, _ = io.ReadFull(serverReader, make([]byte, blobLen))
 
 		// Send RUNSPACEPOOL_STATE response
 		stateData := []byte(`<?xml version="1.0" encoding="utf-8"?>
@@ -534,7 +534,7 @@ func TestDispatchLoopTransportError(t *testing.T) {
 			RunspaceID:  poolID,
 			Data:        stateData,
 		}
-		sendServerMessage(stateMsg)
+		_ = sendServerMessage(stateMsg)
 	}()
 
 	// Open pool
@@ -562,8 +562,8 @@ func TestDispatchLoopTransportError(t *testing.T) {
 
 	// Close the server side to simulate a transport error
 	// This will cause the next receiveMessage to fail with EOF
-	serverWriter.Close()
-	clientReader.Close()
+	_ = serverWriter.Close()
+	_ = clientReader.Close()
 
 	// Wait for pool to detect the error and transition to broken
 	select {
@@ -1133,7 +1133,7 @@ func TestRunspacePool_ContextLifecycle(t *testing.T) {
 
 	go pool.dispatchLoop(pool.ctx)
 
-	pool.Close(context.Background())
+	_ = pool.Close(context.Background())
 
 	select {
 	case <-pool.ctx.Done():

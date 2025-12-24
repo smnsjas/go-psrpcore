@@ -17,7 +17,7 @@ func TestAdapterWrite(t *testing.T) {
 
 	runspaceID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
 	adapter := NewAdapter(transport, runspaceID)
-	t.Cleanup(func() { adapter.Close() })
+	t.Cleanup(func() { _ = adapter.Close() })
 
 	testData := []byte("Hello, PSRP!")
 	n, err := adapter.Write(testData)
@@ -127,7 +127,7 @@ func TestAdapterSendCommand(t *testing.T) {
 	transport := NewTransport(strings.NewReader(""), &buf)
 
 	adapter := NewAdapter(transport, NullGUID)
-	t.Cleanup(func() { adapter.Close() })
+	t.Cleanup(func() { _ = adapter.Close() })
 
 	pipelineID := uuid.MustParse("abcdef12-3456-7890-abcd-ef1234567890")
 	err := adapter.SendCommand(pipelineID)
@@ -147,7 +147,7 @@ func TestAdapterSendPipelineData(t *testing.T) {
 	transport := NewTransport(strings.NewReader(""), &buf)
 
 	adapter := NewAdapter(transport, NullGUID)
-	t.Cleanup(func() { adapter.Close() })
+	t.Cleanup(func() { _ = adapter.Close() })
 
 	pipelineID := uuid.MustParse("abcdef12-3456-7890-abcd-ef1234567890")
 	err := adapter.SendPipelineData(pipelineID, []byte("test"))
@@ -167,7 +167,7 @@ func TestAdapterSendSignal(t *testing.T) {
 	transport := NewTransport(strings.NewReader(""), &buf)
 
 	adapter := NewAdapter(transport, NullGUID)
-	t.Cleanup(func() { adapter.Close() })
+	t.Cleanup(func() { _ = adapter.Close() })
 
 	pipelineID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
 	err := adapter.SendSignal(pipelineID)

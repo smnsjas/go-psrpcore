@@ -78,6 +78,18 @@ const (
 	CLIXMLVersion   = "1.1.0.1"
 )
 
+// Common CLIXML type names
+const (
+	typeNameHashtable = "System.Collections.Hashtable"
+)
+
+// CLIXML element and attribute names
+const (
+	elemLST   = "LST"   // List/Array element
+	elemDCT   = "DCT"   // Dictionary element
+	attrRefID = "RefId" // Reference ID attribute
+)
+
 // safeInt32 safely converts an int to int32, capping at bounds to prevent overflow.
 func safeInt32(v int) int32 {
 	if v > math.MaxInt32 {
@@ -163,7 +175,8 @@ var deserializerPool = sync.Pool{
 // pool for property key slices to reduce allocations during sorting
 var keySlicePool = sync.Pool{
 	New: func() interface{} {
-		return make([]string, 0, 16)
+		s := make([]string, 0, 16)
+		return &s
 	},
 }
 
@@ -307,7 +320,7 @@ func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 		return s.serializeStringFast(val, name)
 
 	case int:
-		return s.serializeInt32Fast(int32(val), name)
+		return s.serializeInt32Fast(safeInt32(val), name)
 
 	case int32:
 		return s.serializeInt32Fast(val, name)
@@ -842,7 +855,7 @@ func (s *Serializer) serializeGenericMap(m map[interface{}]interface{}, name str
 	s.buf.WriteString(`">`)
 
 	// TypeNames for Hashtable
-	typeNames := []string{"System.Collections.Hashtable", "System.Object"}
+	typeNames := []string{typeNameHashtable, "System.Object"}
 	tnKey := strings.Join(typeNames, "|")
 
 	if tnRefID, exists := s.tnRefs[tnKey]; exists {
@@ -955,11 +968,13 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		s.buf.WriteString("<MS>")
 		// Use OrderedMemberKeys if present, otherwise sort alphabetically
 		var keys []string
+		var keysPtr *[]string
 		usePool := false
 		if len(obj.OrderedMemberKeys) > 0 {
 			keys = obj.OrderedMemberKeys
 		} else {
-			keys = keySlicePool.Get().([]string)
+			keysPtr = keySlicePool.Get().(*[]string)
+			keys = *keysPtr
 			keys = keys[:0]
 			usePool = true
 			for k := range obj.Members {
@@ -971,13 +986,15 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 			propValue := obj.Members[propName]
 			if err := s.serializeValueWithName(propValue, propName); err != nil {
 				if usePool {
-					keySlicePool.Put(keys)
+					*keysPtr = keys
+					keySlicePool.Put(keysPtr)
 				}
 				return fmt.Errorf("serialize member %s: %w", propName, err)
 			}
 		}
 		if usePool {
-			keySlicePool.Put(keys)
+			*keysPtr = keys
+			keySlicePool.Put(keysPtr)
 		}
 		s.buf.WriteString("</MS>")
 	}
@@ -986,7 +1003,8 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 	if len(obj.Properties) > 0 {
 		s.buf.WriteString("<Props>")
 		// Sort keys for deterministic output
-		keys := keySlicePool.Get().([]string)
+		keysPtr := keySlicePool.Get().(*[]string)
+		keys := *keysPtr
 		keys = keys[:0]
 		for k := range obj.Properties {
 			keys = append(keys, k)
@@ -995,11 +1013,13 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 		for _, propName := range keys {
 			propValue := obj.Properties[propName]
 			if err := s.serializeValueWithName(propValue, propName); err != nil {
-				keySlicePool.Put(keys)
+				*keysPtr = keys
+				keySlicePool.Put(keysPtr)
 				return fmt.Errorf("serialize property %s: %w", propName, err)
 			}
 		}
-		keySlicePool.Put(keys)
+		*keysPtr = keys
+		keySlicePool.Put(keysPtr)
 		s.buf.WriteString("</Props>")
 	}
 
@@ -1026,7 +1046,7 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 	s.buf.WriteString(`">`)
 
 	// TypeNames for Hashtable
-	tnKey := "System.Collections.Hashtable"
+	tnKey := typeNameHashtable
 	if tnRefID, exists := s.tnRefs[tnKey]; exists {
 		s.buf.WriteString(`<TNRef RefId="`)
 		s.buf.WriteString(strconv.Itoa(tnRefID))
@@ -1045,7 +1065,8 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 	// Serialize dictionary entries with sorted keys for deterministic output
 	s.buf.WriteString("<DCT>")
 
-	keys := keySlicePool.Get().([]string)
+	keysPtr := keySlicePool.Get().(*[]string)
+	keys := *keysPtr
 	keys = keys[:0]
 	for k := range m {
 		keys = append(keys, k)
@@ -1057,17 +1078,20 @@ func (s *Serializer) serializeHashtable(m map[string]interface{}, name string) e
 		s.buf.WriteString("<En>")
 		s.buf.WriteString("<S N=\"Key\">")
 		if err := xml.EscapeText(&s.buf, []byte(k)); err != nil {
-			keySlicePool.Put(keys)
+			*keysPtr = keys
+			keySlicePool.Put(keysPtr)
 			return fmt.Errorf("escape dict key: %w", err)
 		}
 		s.buf.WriteString("</S>")
 		if err := s.serializeValueWithName(v, "Value"); err != nil {
-			keySlicePool.Put(keys)
+			*keysPtr = keys
+			keySlicePool.Put(keysPtr)
 			return fmt.Errorf("serialize dict value for key %s: %w", k, err)
 		}
 		s.buf.WriteString("</En>")
 	}
-	keySlicePool.Put(keys)
+	*keysPtr = keys
+	keySlicePool.Put(keysPtr)
 	s.buf.WriteString("</DCT>")
 
 	s.buf.WriteString("</Obj>")
@@ -1278,13 +1302,13 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 		}
 		return time.Parse(time.RFC3339Nano, s)
 
-	case "LST": // List
+	case elemLST: // List
 		d.depth++
 		result, err := d.deserializeList()
 		d.depth--
 		return result, err
 
-	case "DCT": // Dictionary (raw DCT without Obj wrapper)
+	case elemDCT: // Dictionary (raw DCT without Obj wrapper)
 		d.depth++
 		result, err := d.deserializeDict()
 		d.depth--
@@ -1370,7 +1394,7 @@ func (d *Deserializer) deserializeList() ([]interface{}, error) {
 			result = append(result, val)
 
 		case xml.EndElement:
-			if t.Name.Local == "LST" {
+			if t.Name.Local == elemLST {
 				return result, nil
 			}
 		}
@@ -1402,7 +1426,7 @@ func (d *Deserializer) deserializeDict() (map[string]interface{}, error) {
 			}
 
 		case xml.EndElement:
-			if t.Name.Local == "DCT" {
+			if t.Name.Local == elemDCT {
 				return result, nil
 			}
 		}
@@ -1425,9 +1449,10 @@ func (d *Deserializer) deserializeDictEntry() (string, interface{}, error) {
 			var isKey, isValue bool
 			for _, attr := range t.Attr {
 				if attr.Name.Local == "N" {
-					if attr.Value == "Key" {
+					switch attr.Value {
+					case "Key":
 						isKey = true
-					} else if attr.Value == "Value" {
+					case "Value":
 						isValue = true
 					}
 				}
@@ -1463,7 +1488,7 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 	var refID int
 	hasRefID := false
 	for _, attr := range se.Attr {
-		if attr.Name.Local == "RefId" {
+		if attr.Name.Local == attrRefID {
 			id, err := strconv.Atoi(attr.Value)
 			if err == nil {
 				refID = id
@@ -1495,7 +1520,7 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 				// Store TypeNames in reference map
 				if hasRefID {
 					for _, attr := range t.Attr {
-						if attr.Name.Local == "RefId" {
+						if attr.Name.Local == attrRefID {
 							tnRefID, err := strconv.Atoi(attr.Value)
 							if err == nil {
 								d.tnRefs[tnRefID] = typeNames
@@ -1506,7 +1531,7 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 
 			case "TNRef": // TypeNames reference
 				for _, attr := range t.Attr {
-					if attr.Name.Local == "RefId" {
+					if attr.Name.Local == attrRefID {
 						tnRefID, err := strconv.Atoi(attr.Value)
 						if err == nil {
 							if tn, exists := d.tnRefs[tnRefID]; exists {
@@ -1534,14 +1559,14 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 				}
 				obj.Properties = props
 
-			case "DCT": // Dictionary
+			case elemDCT: // Dictionary
 				hasDict = true
 				dict, err := d.deserializeDict()
 				if err != nil {
 					return nil, err
 				}
 				// If this is a Hashtable, return the map directly
-				if len(typeNames) > 0 && typeNames[0] == "System.Collections.Hashtable" {
+				if len(typeNames) > 0 && typeNames[0] == typeNameHashtable {
 					if hasRefID {
 						d.objRefs[refID] = dict
 					}
@@ -1552,7 +1577,7 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 					obj.Properties[k] = v
 				}
 
-			case "LST": // List
+			case elemLST: // List
 				list, err := d.deserializeList()
 				if err != nil {
 					return nil, err
@@ -1573,7 +1598,7 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 			if t.Name.Local == "Obj" {
 				// Store object in reference map
 				if hasRefID {
-					if hasDict && len(typeNames) > 0 && typeNames[0] == "System.Collections.Hashtable" {
+					if hasDict && len(typeNames) > 0 && typeNames[0] == typeNameHashtable {
 						// Already handled above
 					} else {
 						d.objRefs[refID] = obj
@@ -1653,7 +1678,7 @@ func (d *Deserializer) deserializeProperties() (map[string]interface{}, error) {
 func (d *Deserializer) deserializeRef(se xml.StartElement) (interface{}, error) {
 	// Get RefId from attributes
 	for _, attr := range se.Attr {
-		if attr.Name.Local == "RefId" {
+		if attr.Name.Local == attrRefID {
 			refID, err := strconv.Atoi(attr.Value)
 			if err != nil {
 				return nil, err

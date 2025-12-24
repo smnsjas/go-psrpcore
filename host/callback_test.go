@@ -25,8 +25,8 @@ func newMockHost() *mockHost {
 func (h *mockHost) GetName() string             { return "MockHost" }
 func (h *mockHost) GetVersion() Version         { return Version{Major: 1, Minor: 0} }
 func (h *mockHost) GetInstanceId() string       { return "mock-id" }
-func (h *mockHost) GetCurrentCulture() string   { return "en-US" }
-func (h *mockHost) GetCurrentUICulture() string { return "en-US" }
+func (h *mockHost) GetCurrentCulture() string   { return DefaultCulture }
+func (h *mockHost) GetCurrentUICulture() string { return DefaultCulture }
 func (h *mockHost) UI() HostUI                  { return h.ui }
 
 // mockHostUI implements HostUI for testing
@@ -476,7 +476,7 @@ func TestCallbackHandler_HandleGetCurrentCulture(t *testing.T) {
 	if response.ExceptionRaised {
 		t.Errorf("expected no exception, got: %v", response.ReturnValue)
 	}
-	if response.ReturnValue != "en-US" {
+	if response.ReturnValue != DefaultCulture {
 		t.Errorf("expected 'en-US', got %v", response.ReturnValue)
 	}
 }
@@ -496,7 +496,7 @@ func TestCallbackHandler_HandleGetCurrentUICulture(t *testing.T) {
 	if response.ExceptionRaised {
 		t.Errorf("expected no exception, got: %v", response.ReturnValue)
 	}
-	if response.ReturnValue != "en-US" {
+	if response.ReturnValue != DefaultCulture {
 		t.Errorf("expected 'en-US', got %v", response.ReturnValue)
 	}
 }

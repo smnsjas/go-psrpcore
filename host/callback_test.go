@@ -44,7 +44,7 @@ type mockHostUI struct {
 	choiceResult        int
 	choiceError         error
 	// Progress tracking
-	lastProgressSourceId int64
+	lastProgressSourceID int64
 	lastProgressRecord   *objects.ProgressRecord
 }
 
@@ -86,8 +86,8 @@ func (ui *mockHostUI) WriteWarningLine(text string) {
 	ui.lastWritten = text
 }
 
-func (ui *mockHostUI) WriteProgress(sourceId int64, record *objects.ProgressRecord) {
-	ui.lastProgressSourceId = sourceId
+func (ui *mockHostUI) WriteProgress(sourceID int64, record *objects.ProgressRecord) {
+	ui.lastProgressSourceID = sourceID
 	ui.lastProgressRecord = record
 }
 
@@ -111,7 +111,7 @@ func TestMethodIDString(t *testing.T) {
 		// PSHost methods (1-8)
 		{MethodIDGetName, "GetName"},
 		{MethodIDGetVersion, "GetVersion"},
-		{MethodIDGetInstanceId, "GetInstanceId"},
+		{MethodIDGetInstanceID, "GetInstanceId"},
 		{MethodIDGetCurrentCulture, "GetCurrentCulture"},
 		{MethodIDGetCurrentUICulture, "GetCurrentUICulture"},
 		{MethodIDSetShouldExit, "SetShouldExit"},
@@ -447,7 +447,7 @@ func TestCallbackHandler_HandleGetInstanceId(t *testing.T) {
 
 	call := &RemoteHostCall{
 		CallID:           20,
-		MethodID:         MethodIDGetInstanceId,
+		MethodID:         MethodIDGetInstanceID,
 		MethodParameters: []interface{}{},
 	}
 
@@ -713,9 +713,9 @@ func TestCallbackHandler_HandleWriteProgress(t *testing.T) {
 		t.Errorf("expected no exception, got: %v", response.ReturnValue)
 	}
 
-	// Verify sourceId was captured
-	if host.ui.lastProgressSourceId != 123 {
-		t.Errorf("expected sourceId=123, got %d", host.ui.lastProgressSourceId)
+	// Verify sourceID was captured
+	if host.ui.lastProgressSourceID != 123 {
+		t.Errorf("expected sourceID=123, got %d", host.ui.lastProgressSourceID)
 	}
 
 	// Verify ProgressRecord was deserialized and passed (not nil)
@@ -726,11 +726,11 @@ func TestCallbackHandler_HandleWriteProgress(t *testing.T) {
 	record := host.ui.lastProgressRecord
 
 	// Verify all fields were correctly deserialized
-	if record.ActivityId != 5 {
-		t.Errorf("expected ActivityId=5, got %d", record.ActivityId)
+	if record.ActivityID != 5 {
+		t.Errorf("expected ActivityId=5, got %d", record.ActivityID)
 	}
-	if record.ParentActivityId != 2 {
-		t.Errorf("expected ParentActivityId=2, got %d", record.ParentActivityId)
+	if record.ParentActivityID != 2 {
+		t.Errorf("expected ParentActivityId=2, got %d", record.ParentActivityID)
 	}
 	if record.Activity != "Test Progress" {
 		t.Errorf("expected Activity='Test Progress', got %q", record.Activity)
@@ -843,7 +843,7 @@ func TestMethodIDValues(t *testing.T) {
 	}{
 		{MethodIDGetName, 1},
 		{MethodIDGetVersion, 2},
-		{MethodIDGetInstanceId, 3},
+		{MethodIDGetInstanceID, 3},
 		{MethodIDGetCurrentCulture, 4},
 		{MethodIDGetCurrentUICulture, 5},
 		{MethodIDReadLine, 11},

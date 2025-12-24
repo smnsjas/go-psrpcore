@@ -62,7 +62,7 @@ func TestSecureString_Encryption(t *testing.T) {
 	deser := NewDeserializerWithEncryption(provider)
 
 	// 6. Deserialize
-	items, err := deser.Deserialize([]byte(encoded))
+	items, err := deser.Deserialize(encoded)
 	if err != nil {
 		t.Fatalf("Deserialize failed: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestScriptBlock_Serialization(t *testing.T) {
 
 	// Deserialize
 	deser := NewDeserializer()
-	items, err := deser.Deserialize([]byte(encoded))
+	items, err := deser.Deserialize(encoded)
 	if err != nil {
 		t.Fatalf("Deserialize failed: %v", err)
 	}

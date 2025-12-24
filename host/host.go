@@ -77,7 +77,7 @@ type HostUI interface {
 	WriteWarningLine(text string)
 
 	// WriteProgress outputs a progress record.
-	WriteProgress(sourceId int64, record *objects.ProgressRecord)
+	WriteProgress(sourceID int64, record *objects.ProgressRecord)
 
 	// Prompt displays prompts and returns responses.
 	Prompt(caption, message string, descriptions []FieldDescription) (map[string]interface{}, error)
@@ -169,7 +169,7 @@ func (ui *NullHostUI) WriteErrorLine(text string)                           {}
 func (ui *NullHostUI) WriteDebugLine(text string)                           {}
 func (ui *NullHostUI) WriteVerboseLine(text string)                         {}
 func (ui *NullHostUI) WriteWarningLine(text string)                         {}
-func (ui *NullHostUI) WriteProgress(sourceId int64, record *objects.ProgressRecord) {}
+func (ui *NullHostUI) WriteProgress(sourceID int64, record *objects.ProgressRecord) {}
 
 func (ui *NullHostUI) Prompt(caption, message string, descriptions []FieldDescription) (map[string]interface{}, error) {
 	return make(map[string]interface{}), nil

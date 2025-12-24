@@ -158,10 +158,7 @@ func TestUUIDLittleEndianConversion(t *testing.T) {
 	testUUID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
 
 	// Convert to little-endian
-	leBytes, err := uuidToLittleEndianBytes(testUUID)
-	if err != nil {
-		t.Fatalf("uuidToLittleEndianBytes failed: %v", err)
-	}
+	leBytes := uuidToLittleEndianBytes(testUUID)
 
 	if len(leBytes) != 16 {
 		t.Fatalf("expected 16 bytes, got %d", len(leBytes))
@@ -301,84 +298,84 @@ func TestMessageHelpers(t *testing.T) {
 	data := []byte("test data")
 
 	tests := []struct {
-		name        string
-		createFunc  func() *Message
-		wantType    MessageType
-		wantDest    Destination
-		wantRPID    uuid.UUID
-		wantPID     uuid.UUID
+		name       string
+		createFunc func() *Message
+		wantType   MessageType
+		wantDest   Destination
+		wantRPID   uuid.UUID
+		wantPID    uuid.UUID
 	}{
 		{
-			name:        "NewSessionCapability",
-			createFunc:  func() *Message { return NewSessionCapability(rpID, data) },
-			wantType:    MessageTypeSessionCapability,
-			wantDest:    DestinationServer,
-			wantRPID:    rpID,
-			wantPID:     uuid.Nil,
+			name:       "NewSessionCapability",
+			createFunc: func() *Message { return NewSessionCapability(rpID, data) },
+			wantType:   MessageTypeSessionCapability,
+			wantDest:   DestinationServer,
+			wantRPID:   rpID,
+			wantPID:    uuid.Nil,
 		},
 		{
-			name:        "NewInitRunspacePool",
-			createFunc:  func() *Message { return NewInitRunspacePool(rpID, data) },
-			wantType:    MessageTypeInitRunspacePool,
-			wantDest:    DestinationServer,
-			wantRPID:    rpID,
-			wantPID:     uuid.Nil,
+			name:       "NewInitRunspacePool",
+			createFunc: func() *Message { return NewInitRunspacePool(rpID, data) },
+			wantType:   MessageTypeInitRunspacePool,
+			wantDest:   DestinationServer,
+			wantRPID:   rpID,
+			wantPID:    uuid.Nil,
 		},
 		{
-			name:        "NewRunspacePoolStateMessage",
-			createFunc:  func() *Message { return NewRunspacePoolStateMessage(rpID, RunspacePoolStateOpened, data) },
-			wantType:    MessageTypeRunspacePoolState,
-			wantDest:    DestinationClient,
-			wantRPID:    rpID,
-			wantPID:     uuid.Nil,
+			name:       "NewRunspacePoolStateMessage",
+			createFunc: func() *Message { return NewRunspacePoolStateMessage(rpID, RunspacePoolStateOpened, data) },
+			wantType:   MessageTypeRunspacePoolState,
+			wantDest:   DestinationClient,
+			wantRPID:   rpID,
+			wantPID:    uuid.Nil,
 		},
 		{
-			name:        "NewCreatePipeline",
-			createFunc:  func() *Message { return NewCreatePipeline(rpID, pID, data) },
-			wantType:    MessageTypeCreatePipeline,
-			wantDest:    DestinationServer,
-			wantRPID:    rpID,
-			wantPID:     pID,
+			name:       "NewCreatePipeline",
+			createFunc: func() *Message { return NewCreatePipeline(rpID, pID, data) },
+			wantType:   MessageTypeCreatePipeline,
+			wantDest:   DestinationServer,
+			wantRPID:   rpID,
+			wantPID:    pID,
 		},
 		{
-			name:        "NewPipelineOutput",
-			createFunc:  func() *Message { return NewPipelineOutput(rpID, pID, data) },
-			wantType:    MessageTypePipelineOutput,
-			wantDest:    DestinationClient,
-			wantRPID:    rpID,
-			wantPID:     pID,
+			name:       "NewPipelineOutput",
+			createFunc: func() *Message { return NewPipelineOutput(rpID, pID, data) },
+			wantType:   MessageTypePipelineOutput,
+			wantDest:   DestinationClient,
+			wantRPID:   rpID,
+			wantPID:    pID,
 		},
 		{
-			name:        "NewPipelineState",
-			createFunc:  func() *Message { return NewPipelineState(rpID, pID, PipelineStateCompleted, data) },
-			wantType:    MessageTypePipelineState,
-			wantDest:    DestinationClient,
-			wantRPID:    rpID,
-			wantPID:     pID,
+			name:       "NewPipelineState",
+			createFunc: func() *Message { return NewPipelineState(rpID, pID, PipelineStateCompleted, data) },
+			wantType:   MessageTypePipelineState,
+			wantDest:   DestinationClient,
+			wantRPID:   rpID,
+			wantPID:    pID,
 		},
 		{
-			name:        "NewErrorRecord",
-			createFunc:  func() *Message { return NewErrorRecord(rpID, pID, data) },
-			wantType:    MessageTypeErrorRecord,
-			wantDest:    DestinationClient,
-			wantRPID:    rpID,
-			wantPID:     pID,
+			name:       "NewErrorRecord",
+			createFunc: func() *Message { return NewErrorRecord(rpID, pID, data) },
+			wantType:   MessageTypeErrorRecord,
+			wantDest:   DestinationClient,
+			wantRPID:   rpID,
+			wantPID:    pID,
 		},
 		{
-			name:        "NewPipelineInput",
-			createFunc:  func() *Message { return NewPipelineInput(rpID, pID, data) },
-			wantType:    MessageTypePipelineInput,
-			wantDest:    DestinationServer,
-			wantRPID:    rpID,
-			wantPID:     pID,
+			name:       "NewPipelineInput",
+			createFunc: func() *Message { return NewPipelineInput(rpID, pID, data) },
+			wantType:   MessageTypePipelineInput,
+			wantDest:   DestinationServer,
+			wantRPID:   rpID,
+			wantPID:    pID,
 		},
 		{
-			name:        "NewEndOfPipelineInput",
-			createFunc:  func() *Message { return NewEndOfPipelineInput(rpID, pID) },
-			wantType:    MessageTypeEndOfPipelineInput,
-			wantDest:    DestinationServer,
-			wantRPID:    rpID,
-			wantPID:     pID,
+			name:       "NewEndOfPipelineInput",
+			createFunc: func() *Message { return NewEndOfPipelineInput(rpID, pID) },
+			wantType:   MessageTypeEndOfPipelineInput,
+			wantDest:   DestinationServer,
+			wantRPID:   rpID,
+			wantPID:    pID,
 		},
 	}
 
@@ -469,7 +466,7 @@ func TestMessageEndiannessKnownBytes(t *testing.T) {
 	pID := uuid.UUID{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f}
 
 	msg := &Message{
-		Destination: DestinationServer,        // 2 (0x00000002)
+		Destination: DestinationServer,            // 2 (0x00000002)
 		Type:        MessageTypeSessionCapability, // 0x00010002
 		RunspaceID:  rpID,
 		PipelineID:  pID,

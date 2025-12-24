@@ -1,14 +1,13 @@
+version: "2"
+
 run:
   timeout: 5m
-  tests: false
 
 linters-settings:
   govet:
-    check-shadowing: true
+    shadow: true
   gocyclo:
     min-complexity: 15
-  maligned:
-    suggest-new: true
   dupl:
     threshold: 100
   goconst:
@@ -19,7 +18,8 @@ linters-settings:
   lll:
     line-length: 120
   goimports:
-    local-prefixes: github.com/smnsjas/go-psrpcore
+    local-prefixes:
+      - github.com/smnsjas/go-psrpcore
   gocritic:
     enabled-tags:
       - diagnostic
@@ -34,22 +34,17 @@ linters-settings:
 
 linters:
   enable:
-    - megacheck
     - govet
     - revive
     - gosec
     - gocyclo
     - unconvert
     - goconst
-    - gscoped
     - misspell
     - lll
     - unparam
-    - typecheck
     - ineffassign
     - staticcheck
-    - unused
-    - gosimple
   disable:
     - errcheck
 

@@ -261,33 +261,33 @@ func (p *Pool) State() State {
 
 // SetMinRunspaces sets the minimum number of runspaces in the pool.
 // Must be called before Open().
-func (p *Pool) SetMinRunspaces(min int) error {
+func (p *Pool) SetMinRunspaces(minVal int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.state != StateBeforeOpen {
 		return ErrInvalidState
 	}
-	if min < 1 {
-		return fmt.Errorf("min runspaces must be >= 1, got %d", min)
+	if minVal < 1 {
+		return fmt.Errorf("min runspaces must be >= 1, got %d", minVal)
 	}
-	p.minRunspaces = min
+	p.minRunspaces = minVal
 	return nil
 }
 
 // SetMaxRunspaces sets the maximum number of runspaces in the pool.
 // Must be called before Open().
-func (p *Pool) SetMaxRunspaces(max int) error {
+func (p *Pool) SetMaxRunspaces(maxVal int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.state != StateBeforeOpen {
 		return ErrInvalidState
 	}
-	if max < 1 {
-		return fmt.Errorf("max runspaces must be >= 1, got %d", max)
+	if maxVal < 1 {
+		return fmt.Errorf("max runspaces must be >= 1, got %d", maxVal)
 	}
-	p.maxRunspaces = max
+	p.maxRunspaces = maxVal
 	return nil
 }
 
@@ -352,7 +352,7 @@ func (p *Pool) Open(ctx context.Context) error {
 
 // Close closes the runspace pool.
 // Transitions from Opened → Closing → Closed.
-func (p *Pool) Close(ctx context.Context) error {
+func (p *Pool) Close(_ context.Context) error {
 	p.mu.Lock()
 	currentState := p.state
 
@@ -740,7 +740,7 @@ func (p *Pool) handleTransportError(err error) {
 		p.setState(StateBroken)
 
 		// Close all pipeline channels by transitioning them to failed state
-		p.pipelines.Range(func(key, value interface{}) bool {
+		p.pipelines.Range(func(_, value interface{}) bool {
 			pl := value.(*pipeline.Pipeline)
 			pl.Fail(fmt.Errorf("runspace pool broken: %w", err))
 			return true
@@ -990,11 +990,11 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 			}
 		}
 		// Also check for min/max runspaces in the same object
-		if min, ok := v.Properties["MinRunspaces"].(int32); ok {
-			info.MinRunspaces = int(min)
+		if minRS, ok := v.Properties["MinRunspaces"].(int32); ok {
+			info.MinRunspaces = int(minRS)
 		}
-		if max, ok := v.Properties["MaxRunspaces"].(int32); ok {
-			info.MaxRunspaces = int(max)
+		if maxRS, ok := v.Properties["MaxRunspaces"].(int32); ok {
+			info.MaxRunspaces = int(maxRS)
 		}
 	default:
 		return nil, fmt.Errorf("state is not int32 or PSObject, got %T", objs[0])
@@ -1003,11 +1003,11 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 	// Additional objects may contain min/max runspaces
 	if len(objs) > 1 {
 		if psObj, ok := objs[1].(*serialization.PSObject); ok {
-			if min, ok := psObj.Properties["MinRunspaces"].(int32); ok {
-				info.MinRunspaces = int(min)
+			if minRS, ok := psObj.Properties["MinRunspaces"].(int32); ok {
+				info.MinRunspaces = int(minRS)
 			}
-			if max, ok := psObj.Properties["MaxRunspaces"].(int32); ok {
-				info.MaxRunspaces = int(max)
+			if maxRS, ok := psObj.Properties["MaxRunspaces"].(int32); ok {
+				info.MaxRunspaces = int(maxRS)
 			}
 		}
 	}

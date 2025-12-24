@@ -565,7 +565,7 @@ func TestErrorRecordSerialization(t *testing.T) {
 			Message:    "Something went wrong",
 			StackTrace: "at MyFunction() line 42",
 		},
-		FullyQualifiedErrorId: "ErrorId123",
+		FullyQualifiedErrorID: "ErrorId123",
 		CategoryInfo: objects.CategoryInfo{
 			Category: objects.ErrorCategoryInvalidOperation,
 			Activity: "Test-Command",
@@ -622,7 +622,7 @@ func TestErrorRecordSerialization(t *testing.T) {
 
 	// Verify FullyQualifiedErrorId
 	if obj.Properties["FullyQualifiedErrorId"] != "ErrorId123" {
-		t.Errorf("FullyQualifiedErrorId: got %v, want %v", obj.Properties["FullyQualifiedErrorId"], "ErrorId123")
+		t.Errorf("FullyQualifiedErrorID: got %v, want %v", obj.Properties["FullyQualifiedErrorId"], "ErrorId123")
 	}
 
 	// Verify Exception

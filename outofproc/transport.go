@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 
@@ -81,12 +80,12 @@ var sendBufferPool = sync.Pool{
 
 // SendData sends fragment data to the remote end.
 // The data should be one or more complete PSRP fragments.
-func (t *Transport) SendData(psGuid uuid.UUID, data []byte) error {
-	return t.SendDataWithStream(psGuid, StreamDefault, data)
+func (t *Transport) SendData(psGUID uuid.UUID, data []byte) error {
+	return t.SendDataWithStream(psGUID, StreamDefault, data)
 }
 
 // SendDataWithStream sends fragment data with a specific stream type.
-func (t *Transport) SendDataWithStream(psGuid uuid.UUID, stream Stream, data []byte) error {
+func (t *Transport) SendDataWithStream(psGUID uuid.UUID, stream Stream, data []byte) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -97,7 +96,7 @@ func (t *Transport) SendDataWithStream(psGuid uuid.UUID, stream Stream, data []b
 	buf.WriteString("<Data Stream='")
 	buf.WriteString(string(stream))
 	buf.WriteString("' PSGuid='")
-	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString(formatGUID(psGUID))
 	buf.WriteString("'>")
 
 	encoder := base64.NewEncoder(base64.StdEncoding, buf)
@@ -115,7 +114,7 @@ func (t *Transport) SendDataWithStream(psGuid uuid.UUID, stream Stream, data []b
 
 // SendCommand signals pipeline creation to the server.
 // This must be sent before sending pipeline data.
-func (t *Transport) SendCommand(pipelineGuid uuid.UUID) error {
+func (t *Transport) SendCommand(pipelineGUID uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -124,7 +123,7 @@ func (t *Transport) SendCommand(pipelineGuid uuid.UUID) error {
 	defer sendBufferPool.Put(buf)
 
 	buf.WriteString("<Command PSGuid='")
-	buf.WriteString(formatGUID(pipelineGuid))
+	buf.WriteString(formatGUID(pipelineGUID))
 	buf.WriteString("' />\n")
 
 	_, err := t.writer.Write(buf.Bytes())
@@ -133,7 +132,7 @@ func (t *Transport) SendCommand(pipelineGuid uuid.UUID) error {
 
 // SendClose sends a close signal for a runspace or pipeline.
 // Use NullGUID for runspace-level close.
-func (t *Transport) SendClose(psGuid uuid.UUID) error {
+func (t *Transport) SendClose(psGUID uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -142,7 +141,7 @@ func (t *Transport) SendClose(psGuid uuid.UUID) error {
 	defer sendBufferPool.Put(buf)
 
 	buf.WriteString("<Close PSGuid='")
-	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString(formatGUID(psGUID))
 	buf.WriteString("' />\n")
 
 	_, err := t.writer.Write(buf.Bytes())
@@ -150,7 +149,7 @@ func (t *Transport) SendClose(psGuid uuid.UUID) error {
 }
 
 // SendSignal sends a signal to a pipeline (e.g., to stop execution).
-func (t *Transport) SendSignal(psGuid uuid.UUID) error {
+func (t *Transport) SendSignal(psGUID uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -159,7 +158,7 @@ func (t *Transport) SendSignal(psGuid uuid.UUID) error {
 	defer sendBufferPool.Put(buf)
 
 	buf.WriteString("<Signal PSGuid='")
-	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString(formatGUID(psGUID))
 	buf.WriteString("' />\n")
 
 	_, err := t.writer.Write(buf.Bytes())
@@ -167,7 +166,7 @@ func (t *Transport) SendSignal(psGuid uuid.UUID) error {
 }
 
 // SendDataAck sends a data acknowledgment.
-func (t *Transport) SendDataAck(psGuid uuid.UUID) error {
+func (t *Transport) SendDataAck(psGUID uuid.UUID) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -176,7 +175,7 @@ func (t *Transport) SendDataAck(psGuid uuid.UUID) error {
 	defer sendBufferPool.Put(buf)
 
 	buf.WriteString("<DataAck PSGuid='")
-	buf.WriteString(formatGUID(psGuid))
+	buf.WriteString(formatGUID(psGUID))
 	buf.WriteString("' />\n")
 
 	_, err := t.writer.Write(buf.Bytes())
@@ -192,15 +191,12 @@ func (t *Transport) ReceivePacket() (*Packet, error) {
 			return nil, err
 		}
 
-		// Debug: log what we receive
-		fmt.Fprintf(os.Stderr, "DEBUG RECV: %s\n", truncate(line, 200))
-
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue // Skip empty lines
 		}
 
-		// Skip UTF-8 BOM if present (\xEF\xBB\xBF)
+		// Strip UTF-8 BOM if present
 		line = strings.TrimPrefix(line, "\xEF\xBB\xBF")
 
 		// Find the start of the XML element
@@ -316,11 +312,7 @@ func parsePacket(line string) (*Packet, error) {
 		contentStart++ // Skip '>'
 
 		// Check for self-closing <Data ... /> which means empty data
-		if line[minIdx] == '/' || (minIdx+1 < len(line) && line[minIdx+1] == '/') || strings.HasSuffix(line, "/>") {
-			// If the tag was self-closing, we might have detected it earlier or can check now.
-			// If we found '/>' before contentStart, it's empty.
-			// Simpler check: if we see </Data> at the end.
-		}
+		// We handle this case by checking for the endTag below
 
 		// Robust way: Find </Data> (or </ElementName>)
 		endTag := "</" + elemName + ">"
@@ -349,12 +341,4 @@ func formatGUID(id uuid.UUID) string {
 // IsSessionGUID returns true if the GUID is the null GUID used for session/runspace operations.
 func IsSessionGUID(id uuid.UUID) bool {
 	return id == NullGUID
-}
-
-// truncate shortens a string for error messages.
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
 }

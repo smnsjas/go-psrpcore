@@ -163,7 +163,7 @@ func (s *SecureString) Clear() {
 type ErrorRecord struct {
 	Exception             ExceptionInfo
 	TargetObject          interface{}
-	FullyQualifiedErrorId string
+	FullyQualifiedErrorID string
 	InvocationInfo        *InvocationInfo
 	CategoryInfo          CategoryInfo
 	ErrorDetails          *ErrorDetails
@@ -186,7 +186,7 @@ type InvocationInfo struct {
 	UnboundArguments []interface{}
 	ScriptLineNumber int
 	OffsetInLine     int
-	HistoryId        int64
+	HistoryID        int64
 	ScriptName       string
 	Line             string
 	PositionMessage  string
@@ -250,8 +250,8 @@ type ErrorDetails struct {
 
 // ProgressRecord represents a PowerShell progress update.
 type ProgressRecord struct {
-	ActivityId        int
-	ParentActivityId  int
+	ActivityID        int
+	ParentActivityID  int
 	Activity          string
 	StatusDescription string
 	CurrentOperation  string
@@ -276,9 +276,9 @@ type InformationRecord struct {
 	Tags            []string
 	User            string
 	Computer        string
-	ProcessId       uint32
-	NativeThreadId  uint32
-	ManagedThreadId int
+	ProcessID       uint32
+	NativeThreadID  uint32
+	ManagedThreadID int
 }
 
 // DebugRecord represents a PowerShell debug message.

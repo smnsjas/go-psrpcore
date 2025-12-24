@@ -138,8 +138,7 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 We maintain detailed design documentation and performance analysis in the `docs/` directory:
 
 - [Development Journey](docs/development-journey.md) - Lessons learned building the protocol
-- [Architecture & Endianness](docs/endianness-verification.md) - Protocol details
-- [Security Implementation](docs/issue-6-securestring-findings.md) - SecureString and encryption details
+- [Security Implementation Guide](docs/session-key-implementation-guide.md) - SecureString and encryption implementation details
 - [Performance Baselines](docs/BASELINE_PERFORMANCE.md) - Benchmark results
 
 See [docs/README.md](docs/README.md) for the full index.

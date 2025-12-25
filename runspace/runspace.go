@@ -151,6 +151,9 @@ type Pool struct {
 	state     State
 	transport io.ReadWriter
 
+	// Config
+	SkipHandshakeSend bool // If true, Open() skips sending handshake messages (for WSMan creationXml)
+
 	// Configuration
 	minRunspaces int
 	maxRunspaces int
@@ -332,27 +335,37 @@ func (p *Pool) Open(ctx context.Context) error {
 	p.mu.Unlock()
 
 	// Send SESSION_CAPABILITY
-	if err := p.sendSessionCapability(ctx); err != nil {
-		p.setBroken()
-		return fmt.Errorf("send session capability: %w", err)
-	}
+	if !p.SkipHandshakeSend {
+		if err := p.sendSessionCapability(ctx); err != nil {
+			p.setBroken()
+			return fmt.Errorf("send session capability: %w", err)
+		}
 
-	// Receive SESSION_CAPABILITY response
-	if err := p.receiveSessionCapability(ctx); err != nil {
-		p.setBroken()
-		return fmt.Errorf("receive session capability: %w", err)
+		// Receive SESSION_CAPABILITY response
+		if err := p.receiveSessionCapability(ctx); err != nil {
+			p.setBroken()
+			return fmt.Errorf("receive session capability: %w", err)
+		}
 	}
 
 	// Send INIT_RUNSPACEPOOL
-	if err := p.sendInitRunspacePool(ctx); err != nil {
-		p.setBroken()
-		return fmt.Errorf("send init runspace pool: %w", err)
-	}
+	if !p.SkipHandshakeSend {
+		if err := p.sendInitRunspacePool(ctx); err != nil {
+			p.setBroken()
+			return fmt.Errorf("send init runspace pool: %w", err)
+		}
 
-	// Wait for RUNSPACEPOOL_STATE response
-	if err := p.waitForOpened(ctx); err != nil {
-		p.setBroken()
-		return fmt.Errorf("wait for opened: %w", err)
+		// Wait for RUNSPACEPOOL_STATE response
+		if err := p.waitForOpened(ctx); err != nil {
+			p.setBroken()
+			return fmt.Errorf("wait for opened: %w", err)
+		}
+	} else {
+		// When using creationXml, the server processes handshake synchronously
+		// and doesn't queue responses for Receive operations
+		p.mu.Lock()
+		p.setState(StateOpened)
+		p.mu.Unlock()
 	}
 
 	// Start message dispatch loop
@@ -432,13 +445,17 @@ func (p *Pool) setBroken() {
 
 // sendSessionCapability sends the SESSION_CAPABILITY message to the server.
 func (p *Pool) sendSessionCapability(ctx context.Context) error {
+	msg := p.createSessionCapabilityMessage()
+	return p.sendMessage(ctx, msg)
+}
+
+func (p *Pool) createSessionCapabilityMessage() *messages.Message {
 	// SESSION_CAPABILITY uses raw <Obj> without <Objs> wrapper per MS-PSRP
 	// XML must be compact (no whitespace) for OutOfProcess transport
 	capabilityData := []byte(`<Obj RefId="0"><MS><Version N="protocolversion">2.3</Version>` +
 		`<Version N="PSVersion">2.0</Version><Version N="SerializationVersion">1.1.0.1</Version></MS></Obj>`)
 
-	msg := messages.NewSessionCapability(uuid.Nil, capabilityData)
-	return p.sendMessage(ctx, msg)
+	return messages.NewSessionCapability(uuid.Nil, capabilityData)
 }
 
 // receiveSessionCapability receives and validates the server's SESSION_CAPABILITY response.
@@ -484,6 +501,11 @@ func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 	maxRunspaces := p.maxRunspaces
 	p.mu.RUnlock()
 
+	msg := p.createInitRunspacePoolMessage(minRunspaces, maxRunspaces)
+	return p.sendMessage(ctx, msg)
+}
+
+func (p *Pool) createInitRunspacePoolMessage(minRunspaces, maxRunspaces int) *messages.Message {
 	// Build INIT_RUNSPACEPOOL XML manually to match exact PowerShell format
 	// Per MS-PSRP, this uses <MS> (MemberSet) format, not <Props>
 	initData := fmt.Sprintf(`<Obj RefId="0"><MS>`+
@@ -507,8 +529,7 @@ func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 		`</MS></Obj>`,
 		minRunspaces, maxRunspaces)
 
-	msg := messages.NewInitRunspacePool(p.id, []byte(initData))
-	return p.sendMessage(ctx, msg)
+	return messages.NewInitRunspacePool(p.id, []byte(initData))
 }
 
 // GetCommandMetadata queries the server for information about available commands.
@@ -784,16 +805,9 @@ func (p *Pool) handleTransportError(err error) {
 
 // sendMessage sends a PSRP message through the transport.
 func (p *Pool) sendMessage(ctx context.Context, msg *messages.Message) error {
-	// Encode message
-	encoded, err := msg.Encode()
+	frags, err := p.prepareMessage(msg)
 	if err != nil {
-		return fmt.Errorf("encode message: %w", err)
-	}
-
-	// Fragment message
-	frags, err := p.fragmenter.Fragment(encoded)
-	if err != nil {
-		return fmt.Errorf("fragment message: %w", err)
+		return err
 	}
 
 	// Send each fragment
@@ -824,6 +838,65 @@ func (p *Pool) sendMessage(ctx context.Context, msg *messages.Message) error {
 	}
 
 	return nil
+}
+
+// prepareMessage encodes and fragments a message.
+func (p *Pool) prepareMessage(msg *messages.Message) ([]*fragments.Fragment, error) {
+	// Encode message
+	encoded, err := msg.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("encode message: %w", err)
+	}
+
+	// Fragment message
+	frags, err := p.fragmenter.Fragment(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("fragment message: %w", err)
+	}
+	return frags, nil
+}
+
+// GetHandshakeFragments generates the base64-encoded PSRP fragments matching
+// the session initialization messages (SESSION_CAPABILITY and INIT_RUNSPACEPOOL).
+// This is used for creating the creationXml for the WSMan shell creation.
+func (p *Pool) GetHandshakeFragments() ([]byte, error) {
+	p.mu.RLock()
+	minRunspaces := p.minRunspaces
+	maxRunspaces := p.maxRunspaces
+	p.mu.RUnlock()
+
+	// 1. Session Capability
+	capMsg := p.createSessionCapabilityMessage()
+	capFrags, err := p.prepareMessage(capMsg)
+	if err != nil {
+		return nil, fmt.Errorf("prepare capability fragments: %w", err)
+	}
+
+	// 2. Init RunspacePool
+	initMsg := p.createInitRunspacePoolMessage(minRunspaces, maxRunspaces)
+	initFrags, err := p.prepareMessage(initMsg)
+	if err != nil {
+		return nil, fmt.Errorf("prepare init fragments: %w", err)
+	}
+
+	// Flatten all fragments into a single byte slice by encoding each
+	var totalLen int
+	for _, f := range capFrags {
+		totalLen += len(f.Encode())
+	}
+	for _, f := range initFrags {
+		totalLen += len(f.Encode())
+	}
+
+	result := make([]byte, 0, totalLen)
+	for _, f := range capFrags {
+		result = append(result, f.Encode()...)
+	}
+	for _, f := range initFrags {
+		result = append(result, f.Encode()...)
+	}
+
+	return result, nil
 }
 
 // receiveMessage receives and reassembles a PSRP message from the transport.

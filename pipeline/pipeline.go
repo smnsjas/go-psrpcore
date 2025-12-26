@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/smnsjas/go-psrpcore/fragments"
 	"github.com/smnsjas/go-psrpcore/host"
 	"github.com/smnsjas/go-psrpcore/messages"
 	"github.com/smnsjas/go-psrpcore/objects"
@@ -109,14 +110,18 @@ type Pipeline struct {
 
 	// channelTimeout is the timeout for channel send operations when buffer is full.
 	channelTimeout time.Duration
+
+	// skipInvokeSend prevents Invoke from sending the CreatePipeline message.
+	// Used when the data was already sent via another mechanism (e.g., WSMan Command Arguments).
+	skipInvokeSend bool
 }
 
 // New creates a new Pipeline attached to the given transport.
 // command can be a raw script, which will be wrapped in a PowerShell object.
 func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 	ps := objects.NewPowerShell()
-	// Default to false (cmdlet), not true (script)
-	ps.AddCommand(command, false)
+	// Default to true (script) to support arbitrary commands and pipelines
+	ps.AddCommand(command, true)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Pipeline{
@@ -151,6 +156,132 @@ func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 		cancel:         cancel,
 		channelTimeout: DefaultChannelTimeout,
 	}
+}
+
+// SkipInvokeSend prevents Invoke from sending the CreatePipeline message.
+// Use this when the CreatePipeline data was already sent via another mechanism
+// (e.g., embedded in WSMan Command Arguments).
+func (p *Pipeline) SkipInvokeSend() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.skipInvokeSend = true
+}
+
+// GetCreatePipelineData generates the CreatePipeline PSRP fragment data.
+// This is used by WSMan transports that need to embed the fragment in Command Arguments.
+// The returned data is the raw PSRP fragment bytes (not base64 encoded).
+func (p *Pipeline) GetCreatePipelineData() ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Serialize the PowerShell object to CLIXML
+	serializer := serialization.NewSerializer()
+	defer serializer.Close()
+	cmdData, err := serializer.SerializeRaw(p.powerShell)
+	if err != nil {
+		return nil, fmt.Errorf("serialize command: %w", err)
+	}
+
+	// Create CREATE_PIPELINE message
+	msg := messages.NewCreatePipeline(p.runspaceID, p.id, cmdData)
+
+	// Encode message to bytes
+	encoded, err := msg.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("encode message: %w", err)
+	}
+
+	// Fragment the encoded message using 32KB max size (standard PSRP)
+	fragmenter := fragments.NewFragmenter(32768)
+	frags, err := fragmenter.Fragment(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("fragment message: %w", err)
+	}
+	if len(frags) == 0 {
+		return nil, fmt.Errorf("no fragments generated")
+	}
+
+	// Encode all fragments into a single byte slice
+	var result []byte
+	for _, f := range frags {
+		result = append(result, f.Encode()...)
+	}
+
+	return result, nil
+}
+
+// GetCreatePipelineDataWithID generates the CreatePipeline PSRP fragment data with a specific starting object ID.
+// This allows synchronizing the object ID with the session's sequence.
+// The provided startObjectID will be incremented before use (ID = startObjectID + 1).
+// So to use ID 3, pass startObjectID = 2.
+func (p *Pipeline) GetCreatePipelineDataWithID(startObjectID uint64) ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Serialize the PowerShell object to CLIXML
+	serializer := serialization.NewSerializer()
+	defer serializer.Close()
+	cmdData, err := serializer.SerializeRaw(p.powerShell)
+	if err != nil {
+		return nil, fmt.Errorf("serialize command: %w", err)
+	}
+
+	// Create CREATE_PIPELINE message
+	msg := messages.NewCreatePipeline(p.runspaceID, p.id, cmdData)
+
+	// Encode message to bytes
+	encoded, err := msg.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("encode message: %w", err)
+	}
+
+	// Fragment the encoded message using 32KB max size (standard PSRP)
+	// Use explicit startObjectID.
+	// Note: Fragmenter increments ID before usage (f.objectID++), so we must initialize with startObjectID-1
+	// to ensure the first fragment actually uses startObjectID.
+	fragmenter := fragments.NewFragmenterWithID(32768, startObjectID-1)
+	frags, err := fragmenter.Fragment(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("fragment message: %w", err)
+	}
+	if len(frags) == 0 {
+		return nil, fmt.Errorf("no fragments generated")
+	}
+
+	// Encode all fragments into a single byte slice
+	var result []byte
+	for _, f := range frags {
+		result = append(result, f.Encode()...)
+	}
+
+	return result, nil
+}
+
+// GetCloseInputData generates the PSRP fragments for the END_OF_PIPELINE_INPUT message.
+// This allows embedding the EOF message in the WSMan Command arguments.
+func (p *Pipeline) GetCloseInputData() ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	msg := messages.NewEndOfPipelineInput(p.runspaceID, p.id)
+
+	encoded, err := msg.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("encode message: %w", err)
+	}
+
+	fragmenter := fragments.NewFragmenter(32768)
+	frags, err := fragmenter.Fragment(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("fragment message: %w", err)
+	}
+
+	var result []byte
+	for _, f := range frags {
+		result = append(result, f.Encode()...)
+	}
+
+	return result, nil
 }
 
 // AddCommand adds a cmdlet or script to the pipeline.
@@ -209,7 +340,14 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 		return ErrInvalidState
 	}
 	p.state = StateRunning
+	skipSend := p.skipInvokeSend
 	p.mu.Unlock()
+
+	// If CreatePipeline data was already sent (e.g., via WSMan Command Arguments),
+	// skip sending it again
+	if skipSend {
+		return nil
+	}
 
 	// Create CREATE_PIPELINE message
 	// Serialize the PowerShell object to CLIXML
@@ -284,6 +422,7 @@ func (p *Pipeline) CloseInput(ctx context.Context) error {
 	}
 	p.mu.Unlock()
 
+	// Send END_OF_PIPELINE_INPUT message (MS-PSRP 2.2.2.18)
 	msg := messages.NewEndOfPipelineInput(p.runspaceID, p.id)
 	if err := p.transport.SendMessage(ctx, msg); err != nil {
 		return fmt.Errorf("send end of pipeline input: %w", err)

@@ -69,6 +69,7 @@ import (
 const HeaderSize = 21
 
 // Flag bits for fragment headers.
+// MS-PSRP Section 2.2.4 defines only two flags: Start (S) and End (E).
 const (
 	FlagStart = 1 << 0
 	FlagEnd   = 1 << 1
@@ -109,6 +110,7 @@ func (f *Fragment) Encode() []byte {
 	if f.End {
 		flags |= FlagEnd
 	}
+
 	buf[16] = flags
 
 	if len(f.Data) > math.MaxUint32 {
@@ -138,11 +140,12 @@ func Decode(data []byte) (*Fragment, error) {
 	f := &Fragment{
 		// ObjectID (8 bytes, big-endian) - MS-PSRP 2.2.4
 		ObjectID: binary.BigEndian.Uint64(data[0:8]),
-		// FragmentID (8 bytes, big-endian) - MS-PSRP 2.2.4
-		FragmentID: binary.BigEndian.Uint64(data[8:16]),
-		Start:      data[16]&FlagStart != 0,
-		End:        data[16]&FlagEnd != 0,
 	}
+	f.FragmentID = binary.BigEndian.Uint64(data[8:16])
+
+	flags := data[16]
+	f.Start = (flags & FlagStart) != 0
+	f.End = (flags & FlagEnd) != 0
 
 	// BlobLength (4 bytes, big-endian) - MS-PSRP 2.2.4
 	blobLen := binary.BigEndian.Uint32(data[17:21])
@@ -190,6 +193,20 @@ type Fragmenter struct {
 func NewFragmenter(maxSize int) *Fragmenter {
 	return &Fragmenter{
 		maxSize: maxSize,
+	}
+}
+
+// NewFragmenterWithID creates a new Fragmenter with the given maximum fragment size and starting object ID.
+// The object ID will be incremented before use (so pass startID = desiredID - 1).
+// Alternatively, we can adjust the logic. The current Fragment method does `f.objectID++` first.
+// So if we want the first message to be X, we should initialize with X-1.
+// However, to make it more intuitive, let's allow setting the current value and adjust usage or internal logic?
+// No, stick to the pattern: Fragment() increments then uses.
+// So NewFragmenterWithID(size, 2) means next Fragment() call uses 3.
+func NewFragmenterWithID(maxSize int, currentObjectID uint64) *Fragmenter {
+	return &Fragmenter{
+		maxSize:  maxSize,
+		objectID: currentObjectID,
 	}
 }
 

@@ -191,10 +191,11 @@ type Pool struct {
 	doneCh     chan struct{}
 
 	// Lifecycle
-	ctx          context.Context
-	cancel       context.CancelFunc
-	cleanupOnce  sync.Once
-	cleanupError error // Store the error that caused the breakdown
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	cleanupOnce         sync.Once
+	cleanupError        error // Store the error that caused the breakdown
+	dispatchLoopStarted bool  // Track if dispatch loop has been started
 }
 
 // New creates a new RunspacePool with the given transport and ID.
@@ -362,16 +363,37 @@ func (p *Pool) Open(ctx context.Context) error {
 		}
 	} else {
 		// When using creationXml, the server processes handshake synchronously
-		// and doesn't queue responses for Receive operations
+		// and doesn't queue responses for Receive operations.
+		// Don't start dispatchLoop here - it will be started when CreatePipeline
+		// is called and the transport is properly configured.
 		p.mu.Lock()
 		p.setState(StateOpened)
 		p.mu.Unlock()
+		return nil
 	}
 
-	// Start message dispatch loop
+	// Start message dispatch loop (only for normal handshake flow)
+	p.mu.Lock()
+	p.dispatchLoopStarted = true
+	p.mu.Unlock()
 	go p.dispatchLoop(p.ctx)
 
 	return nil
+}
+
+// StartDispatchLoop starts the message dispatch loop.
+// This should be called after configuring the transport when using creationXml flow
+// (SkipHandshakeSend = true). For normal handshake flow, the loop is started automatically.
+func (p *Pool) StartDispatchLoop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.dispatchLoopStarted {
+		return // Already started
+	}
+
+	p.dispatchLoopStarted = true
+	go p.dispatchLoop(p.ctx)
 }
 
 // Close closes the runspace pool.
@@ -676,13 +698,16 @@ func (p *Pool) SendMessage(ctx context.Context, msg *messages.Message) error {
 }
 
 // CreatePipeline creates a new pipeline in the runspace pool.
+// Note: For creationXml flow, call StartDispatchLoop() after configuring the transport.
 func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	if p.state != StateOpened {
+		p.mu.Unlock()
 		return nil, ErrNotOpen
 	}
+
+	p.mu.Unlock()
 
 	pl := pipeline.New(p, p.id, command)
 	p.pipelines.Store(pl.ID(), pl)
@@ -853,6 +878,7 @@ func (p *Pool) prepareMessage(msg *messages.Message) ([]*fragments.Fragment, err
 	if err != nil {
 		return nil, fmt.Errorf("fragment message: %w", err)
 	}
+
 	return frags, nil
 }
 

@@ -1748,23 +1748,22 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 
 	// 3. Add properties to Root (as Members, per MS-PSRP spec example)
 	root.Members["NoInput"] = true
-	root.Members["AddToHistory"] = true // Ruby template uses true
-	root.Members["IsNested"] = p.IsNested
-
-	// ApartmentState: Unknown (2) for macOS, MTA (1) for Windows
-	// Type = System.Threading.ApartmentState (NOT Runspaces!)
+	// ApartmentState: pypsrp uses System.Management.Automation.Runspaces.ApartmentState
 	root.Members["ApartmentState"] = &PSRPEnum{
-		Type:     "System.Threading.ApartmentState",
-		Value:    2, // Unknown for macOS
-		ToString: "Unknown",
+		Type:     "System.Management.Automation.Runspaces.ApartmentState",
+		Value:    2, // Unknown
+		ToString: "UNKNOWN",
 	}
 
-	// RemoteStreamOptions: Ruby template uses 0, not 15
+	// RemoteStreamOptions: pypsrp uses 11 (AddInvocationInfo | AddInvocationInfoToError | AddInvocationInfoToDebug)
 	root.Members["RemoteStreamOptions"] = &PSRPEnum{
-		Type:     "System.Management.Automation.RemoteStreamOptions",
-		Value:    0, // Ruby template uses 0
-		ToString: "0",
+		Type:     "System.Management.Automation.Runspaces.RemoteStreamOptions",
+		Value:    11,
+		ToString: "AddInvocationInfo",
 	}
+
+	root.Members["AddToHistory"] = false // pypsrp uses false
+	root.Members["IsNested"] = p.IsNested
 
 	// 4. HostInfo - per MS-PSRP spec and pypsrp
 	hostInfoProps := make(map[string]interface{})

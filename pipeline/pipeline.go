@@ -97,8 +97,13 @@ type Pipeline struct {
 	powerShell *objects.PowerShell
 
 	// Channels for streams
-	outputCh chan *messages.Message
-	errorCh  chan *messages.Message
+	outputCh      chan *messages.Message
+	errorCh       chan *messages.Message
+	warningCh     chan *messages.Message
+	verboseCh     chan *messages.Message
+	debugCh       chan *messages.Message
+	progressCh    chan *messages.Message
+	informationCh chan *messages.Message
 
 	// Completion
 	doneCh chan struct{}
@@ -132,6 +137,11 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 		powerShell:     ps,
 		outputCh:       make(chan *messages.Message, 100), // Buffered to prevent blocking
 		errorCh:        make(chan *messages.Message, 100),
+		warningCh:      make(chan *messages.Message, 100),
+		verboseCh:      make(chan *messages.Message, 100),
+		debugCh:        make(chan *messages.Message, 100),
+		progressCh:     make(chan *messages.Message, 100),
+		informationCh:  make(chan *messages.Message, 100),
 		doneCh:         make(chan struct{}),
 		ctx:            ctx,
 		cancel:         cancel,
@@ -151,6 +161,11 @@ func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 		powerShell:     objects.NewPowerShell(),
 		outputCh:       make(chan *messages.Message, 100),
 		errorCh:        make(chan *messages.Message, 100),
+		warningCh:      make(chan *messages.Message, 100),
+		verboseCh:      make(chan *messages.Message, 100),
+		debugCh:        make(chan *messages.Message, 100),
+		progressCh:     make(chan *messages.Message, 100),
+		informationCh:  make(chan *messages.Message, 100),
 		doneCh:         make(chan struct{}),
 		ctx:            ctx,
 		cancel:         cancel,
@@ -447,6 +462,31 @@ func (p *Pipeline) Error() <-chan *messages.Message {
 	return p.errorCh
 }
 
+// Warning returns a channel that emits warning messages.
+func (p *Pipeline) Warning() <-chan *messages.Message {
+	return p.warningCh
+}
+
+// Verbose returns a channel that emits verbose messages.
+func (p *Pipeline) Verbose() <-chan *messages.Message {
+	return p.verboseCh
+}
+
+// Debug returns a channel that emits debug messages.
+func (p *Pipeline) Debug() <-chan *messages.Message {
+	return p.debugCh
+}
+
+// Progress returns a channel that emits progress messages.
+func (p *Pipeline) Progress() <-chan *messages.Message {
+	return p.progressCh
+}
+
+// Information returns a channel that emits information messages.
+func (p *Pipeline) Information() <-chan *messages.Message {
+	return p.informationCh
+}
+
 // Wait waits for the pipeline to complete and returns any error.
 func (p *Pipeline) Wait() error {
 	<-p.doneCh
@@ -459,6 +499,34 @@ func (p *Pipeline) Wait() error {
 // This can be used with select for non-blocking completion checks.
 func (p *Pipeline) Done() <-chan struct{} {
 	return p.doneCh
+}
+
+// sendToChannel sends a message to the specified channel with timeout-based back-pressure.
+func (p *Pipeline) sendToChannel(
+	ch chan *messages.Message,
+	msg *messages.Message,
+	name string,
+) error {
+	// Try immediate send first (fast path)
+	select {
+	case ch <- msg:
+		return nil
+	default:
+	}
+
+	// Buffer full - block with timeout for back-pressure
+	p.mu.RLock()
+	timeout := p.channelTimeout
+	p.mu.RUnlock()
+
+	select {
+	case ch <- msg:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("%w: %s channel timeout after %v", ErrBufferFull, name, timeout)
+	case <-p.ctx.Done():
+		return p.ctx.Err()
+	}
 }
 
 // HandleMessage processes an incoming message destined for this pipeline.
@@ -513,6 +581,21 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		case <-p.ctx.Done():
 			return p.ctx.Err()
 		}
+
+	case messages.MessageTypeWarningRecord:
+		return p.sendToChannel(p.warningCh, msg, "warning")
+
+	case messages.MessageTypeVerboseRecord:
+		return p.sendToChannel(p.verboseCh, msg, "verbose")
+
+	case messages.MessageTypeDebugRecord:
+		return p.sendToChannel(p.debugCh, msg, "debug")
+
+	case messages.MessageTypeProgressRecord:
+		return p.sendToChannel(p.progressCh, msg, "progress")
+
+	case messages.MessageTypeInformationRecord:
+		return p.sendToChannel(p.informationCh, msg, "information")
 
 	case messages.MessageTypePipelineState:
 		deser := serialization.NewDeserializer()
@@ -659,6 +742,11 @@ func (p *Pipeline) transition(newState State, err error) {
 			close(p.doneCh)
 			close(p.outputCh)
 			close(p.errorCh)
+			close(p.warningCh)
+			close(p.verboseCh)
+			close(p.debugCh)
+			close(p.progressCh)
+			close(p.informationCh)
 			p.cancel()
 		}
 	}

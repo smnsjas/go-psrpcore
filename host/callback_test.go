@@ -91,15 +91,17 @@ func (ui *mockHostUI) WriteProgress(sourceID int64, record *objects.ProgressReco
 	ui.lastProgressRecord = record
 }
 
-func (ui *mockHostUI) Prompt(_, _ string, descriptions []FieldDescription) (map[string]interface{}, error) {
+func (ui *mockHostUI) Prompt(_, _ string, _ []FieldDescription) (map[string]interface{}, error) {
 	return ui.promptResult, ui.promptError
 }
 
-func (ui *mockHostUI) PromptForCredential(_, _, userName, targetName string, allowedCredentialTypes CredentialTypes, options CredentialUIOptions) (*objects.PSCredential, error) {
+func (ui *mockHostUI) PromptForCredential(
+	_, _, _, _ string, _ CredentialTypes, _ CredentialUIOptions,
+) (*objects.PSCredential, error) {
 	return ui.credentialResult, ui.credentialError
 }
 
-func (ui *mockHostUI) PromptForChoice(_, _ string, choices []ChoiceDescription, defaultChoice int) (int, error) {
+func (ui *mockHostUI) PromptForChoice(_, _ string, _ []ChoiceDescription, _ int) (int, error) {
 	return ui.choiceResult, ui.choiceError
 }
 

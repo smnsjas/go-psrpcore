@@ -209,8 +209,8 @@ func runConcurrentTest(ctx context.Context, pool *runspace.Pool) bool {
 			}
 		}()
 		go func() {
+			//nolint:revive // drain error channel
 			for range pl.Error() {
-				// drain
 			}
 		}()
 
@@ -355,9 +355,11 @@ func main() {
 
 		// 10. Command with boolean parameter
 		{
-			Name:        "Boolean Parameter",
-			Command:     "Invoke-Expression",
-			Parameters:  map[string]interface{}{"Command": "Get-ChildItem $env:HOME -Force | Select-Object -First 3 -Property Name"},
+			Name:    "Boolean Parameter",
+			Command: "Invoke-Expression",
+			Parameters: map[string]interface{}{
+				"Command": "Get-ChildItem $env:HOME -Force | Select-Object -First 3 -Property Name",
+			},
 			Description: "Command using -Force switch",
 		},
 

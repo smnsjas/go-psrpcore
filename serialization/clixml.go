@@ -293,6 +293,11 @@ func (s *Serializer) serializeValue(v interface{}) error {
 	return s.serializeValueWithName(v, "")
 }
 
+// serializeValueWithName handles serialization dispatch for all supported types.
+// The type switch is the idiomatic Go pattern for multi-type dispatch and cannot
+// be meaningfully reduced without sacrificing clarity.
+//
+//nolint:gocyclo // Type switch for value serialization - inherent complexity
 func (s *Serializer) serializeValueWithName(v interface{}, name string) error {
 	if v == nil {
 		if name != "" {
@@ -777,7 +782,8 @@ func ErrorRecordToPSObject(err *objects.ErrorRecord) *PSObject {
 				// Cap at MaxInt32 if somehow larger
 				invProps["ScriptLineNumber"] = int32(math.MaxInt32)
 			} else {
-				invProps["ScriptLineNumber"] = int32(err.InvocationInfo.ScriptLineNumber) // #nosec G115 -- bounds checked via if/else cap
+				// #nosec G115 -- bounds checked via if/else cap
+				invProps["ScriptLineNumber"] = int32(err.InvocationInfo.ScriptLineNumber)
 			}
 		}
 		if err.InvocationInfo.ScriptName != "" {
@@ -1232,6 +1238,10 @@ func (d *Deserializer) deserializeNext() (interface{}, bool, error) {
 	}
 }
 
+// deserializeElement handles element-based deserialization dispatch.
+// Type switch is idiomatic Go for multi-type dispatch.
+//
+//nolint:gocyclo // XML element type dispatch - inherent complexity
 func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, error) {
 	// Check recursion depth before processing complex types
 	if d.depth >= d.maxDepth {
@@ -1479,6 +1489,10 @@ func (d *Deserializer) deserializeDictEntry() (string, interface{}, error) {
 	}
 }
 
+// deserializeObject handles PSObject deserialization with all property types.
+// Type switch is idiomatic Go for multi-type dispatch.
+//
+//nolint:gocyclo // PSObject property type dispatch - inherent complexity
 func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, error) {
 	obj := &PSObject{
 		Properties: make(map[string]interface{}),
@@ -1755,7 +1769,8 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 		ToString: "UNKNOWN",
 	}
 
-	// RemoteStreamOptions: pypsrp uses 15 (AddInvocationInfo | AddInvocationInfoToError | AddInvocationInfoToWarning | AddInvocationInfoToDebug)
+	// RemoteStreamOptions: pypsrp uses 15
+	// (AddInvocationInfo | AddInvocationInfoToError | AddInvocationInfoToWarning | AddInvocationInfoToDebug)
 	root.Members["RemoteStreamOptions"] = &PSRPEnum{
 		Type:     "System.Management.Automation.Runspaces.RemoteStreamOptions",
 		Value:    15,

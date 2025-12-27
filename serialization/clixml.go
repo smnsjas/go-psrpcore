@@ -1730,10 +1730,10 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 	// Inner PowerShell object (ToPSObjectForRemoting)
 	// Has: Cmds, IsNested, History, RedirectShellErrorOutputPipe
 	innerPS.Members["Cmds"] = cmdsWrapper
-	innerPS.Members["IsNested"] = p.IsNested               // IS in inner object per PowerShell reference
-	innerPS.Members["History"] = nil                       // Nil is accepted
-	innerPS.Members["RedirectShellErrorOutputPipe"] = true // PowerShell ToPSObjectForRemoting uses TRUE
-	innerPS.Members["ExtraCmds"] = nil                     // pypsrp includes ExtraCmds as Nil
+	innerPS.Members["IsNested"] = p.IsNested                // IS in inner object per PowerShell reference
+	innerPS.Members["History"] = nil                        // Nil is accepted
+	innerPS.Members["RedirectShellErrorOutputPipe"] = false // pypsrp uses false
+	innerPS.Members["ExtraCmds"] = nil                      // pypsrp includes ExtraCmds as Nil
 
 	// Set order to match pypsrp: IsNested, ExtraCmds, Cmds, History, RedirectShellErrorOutputPipe
 	innerPS.OrderedMemberKeys = []string{"IsNested", "ExtraCmds", "Cmds", "History", "RedirectShellErrorOutputPipe"}
@@ -1755,10 +1755,10 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 		ToString: "UNKNOWN",
 	}
 
-	// RemoteStreamOptions: pypsrp uses 11 (AddInvocationInfo | AddInvocationInfoToError | AddInvocationInfoToDebug)
+	// RemoteStreamOptions: pypsrp uses 15 (AddInvocationInfo | AddInvocationInfoToError | AddInvocationInfoToWarning | AddInvocationInfoToDebug)
 	root.Members["RemoteStreamOptions"] = &PSRPEnum{
 		Type:     "System.Management.Automation.Runspaces.RemoteStreamOptions",
-		Value:    11,
+		Value:    15,
 		ToString: "AddInvocationInfo",
 	}
 
@@ -1800,30 +1800,35 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 func CommandToPSObject(c *objects.Command) *PSObject {
 	var params []interface{}
 	for _, p := range c.Parameters {
-		// 1. Parameter Name (if present)
 		if p.Name != "" {
-			nameObj := &PSObject{
-				Members: map[string]interface{}{
-					"N": "-" + p.Name,
-					"V": nil,
-				},
-				OrderedMemberKeys: []string{"N", "V"},
-			}
-			params = append(params, nameObj)
-		}
+			// Named parameter
+			// PyPSRP sends Name and Value in the same object, without "-" prefix on Name
+			// Example: <Obj><MS><S N="N">Command</S><S N="V">hostname</S></MS></Obj>
+			val := p.Value
+			// Logic hole: If value is nil, is it a Switch?
+			// For now, if it's nil, we explicitly set it to nil (V=nil).
+			// If it's a switch parameter, the caller (PowerShell) typically sets value to true/false.
 
-		// 2. Parameter Value (if present, or if it was just a name we typically assume non-switch parameters have values)
-		// Logic: If Value is not nil, add it.
-		// NOTE: If Value is nil and Name is present, it acts as a SwitchParameter (e.g. -Verbose).
-		if p.Value != nil {
-			valObj := &PSObject{
+			obj := &PSObject{
 				Members: map[string]interface{}{
-					"N": nil,
-					"V": p.Value,
+					"N": p.Name,
+					"V": val,
 				},
 				OrderedMemberKeys: []string{"N", "V"},
 			}
-			params = append(params, valObj)
+			params = append(params, obj)
+		} else {
+			// Positional argument (Value only)
+			if p.Value != nil {
+				valObj := &PSObject{
+					Members: map[string]interface{}{
+						"N": nil,
+						"V": p.Value,
+					},
+					OrderedMemberKeys: []string{"N", "V"},
+				}
+				params = append(params, valObj)
+			}
 		}
 	}
 

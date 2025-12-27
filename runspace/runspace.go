@@ -724,13 +724,56 @@ func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 	// Start a monitoring goroutine to remove the pipeline when it's done
 	// Also listens to pool's done channel to avoid goroutine leak if pool is closed
 	go func() {
+		defer p.pipelines.Delete(pl.ID())
 		select {
 		case <-pl.Done():
-			// Pipeline completed normally
 		case <-p.doneCh:
-			// Pool was closed/broken
+			// If pool is closed, cancel the pipeline
+			pl.Cancel()
+		case <-p.ctx.Done(): // Also respect the pool's context cancellation
+			pl.Cancel()
 		}
-		p.removePipeline(pl.ID())
+	}()
+
+	return pl, nil
+}
+
+// CreatePipelineBuilder creates a new pipeline builder in the runspace pool.
+// This allows constructing a pipeline with multiple commands or specific options (e.g. IsScript=false).
+func (p *Pool) CreatePipelineBuilder() (*pipeline.Pipeline, error) {
+	p.mu.Lock()
+
+	if p.state != StateOpened {
+		p.mu.Unlock()
+		return nil, ErrNotOpen
+	}
+
+	p.mu.Unlock()
+
+	pl := pipeline.NewBuilder(p, p.id)
+	p.pipelines.Store(pl.ID(), pl)
+
+	// If the transport supports MultiplexedTransport (e.g. OutOfProcess),
+	// we must send a Command creation packet before any pipeline data.
+	if mux, ok := p.transport.(MultiplexedTransport); ok {
+		if err := mux.SendCommand(pl.ID()); err != nil {
+			p.pipelines.Delete(pl.ID())
+			return nil, fmt.Errorf("send command creation: %w", err)
+		}
+	}
+
+	// Start a monitoring goroutine to remove the pipeline when it's done
+	// Also listens to pool's done channel to avoid goroutine leak if pool is closed
+	go func() {
+		defer p.pipelines.Delete(pl.ID())
+		select {
+		case <-pl.Done():
+		case <-p.doneCh:
+			// If pool is closed, cancel the pipeline
+			pl.Cancel()
+		case <-p.ctx.Done(): // Also respect the pool's context cancellation
+			pl.Cancel()
+		}
 	}()
 
 	return pl, nil

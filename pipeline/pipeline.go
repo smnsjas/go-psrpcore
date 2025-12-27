@@ -332,6 +332,12 @@ func (p *Pipeline) State() State {
 	return p.state
 }
 
+// Cancel cancels the pipeline execution locally.
+// This does not send a stop signal to the server.
+func (p *Pipeline) Cancel() {
+	p.cancel()
+}
+
 // Invoke starts the pipeline execution.
 func (p *Pipeline) Invoke(ctx context.Context) error {
 	p.mu.Lock()
@@ -634,15 +640,25 @@ func (p *Pipeline) transition(newState State, err error) {
 		return
 	}
 
+	// If already in a terminal state, do not allow further transitions
+	if p.state == StateCompleted || p.state == StateFailed || p.state == StateStopped || p.state == StateDisconnected {
+		return
+	}
+
 	p.state = newState
 	p.err = err
 
 	// Terminal states: close channels and cancel context
 	if newState == StateCompleted || newState == StateFailed || newState == StateStopped || newState == StateDisconnected {
-		close(p.doneCh)
-		close(p.outputCh)
-		close(p.errorCh)
-		p.cancel()
+		select {
+		case <-p.doneCh:
+			// Already closed
+		default:
+			close(p.doneCh)
+			close(p.outputCh)
+			close(p.errorCh)
+			p.cancel()
+		}
 	}
 }
 

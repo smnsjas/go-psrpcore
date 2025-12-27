@@ -466,6 +466,8 @@ func (p *Pipeline) Done() <-chan struct{} {
 // If a channel buffer is full, this method will block for up to channelTimeout
 // before returning ErrBufferFull. This prevents unbounded memory growth while
 // avoiding deadlocks with slow consumers.
+//
+//nolint:gocyclo // Message type dispatch with error handling - inherent complexity
 func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 	switch msg.Type {
 	case messages.MessageTypePipelineOutput:

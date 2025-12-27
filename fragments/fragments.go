@@ -314,7 +314,8 @@ func (a *Assembler) Add(f *Fragment) (complete bool, data []byte, err error) {
 	// DoS protection: limit fragments per message
 	if pm.received >= a.maxFragmentsPerMsg {
 		delete(a.pending, f.ObjectID) // Clean up to prevent leak
-		return false, nil, fmt.Errorf("too many fragments for message %d: %d >= %d", f.ObjectID, pm.received, a.maxFragmentsPerMsg)
+		return false, nil, fmt.Errorf(
+			"too many fragments for message %d: %d >= %d", f.ObjectID, pm.received, a.maxFragmentsPerMsg)
 	}
 
 	if _, dup := pm.fragments[f.FragmentID]; dup {

@@ -85,7 +85,11 @@ type HostUI interface {
 	Prompt(caption, message string, descriptions []FieldDescription) (map[string]interface{}, error)
 
 	// PromptForCredential prompts for credentials.
-	PromptForCredential(caption, message, userName, targetName string, allowedCredentialTypes CredentialTypes, options CredentialUIOptions) (*objects.PSCredential, error)
+	PromptForCredential(
+		caption, message, userName, targetName string,
+		allowedCredentialTypes CredentialTypes,
+		options CredentialUIOptions,
+	) (*objects.PSCredential, error)
 
 	// PromptForChoice displays choices and returns the selection.
 	PromptForChoice(caption, message string, choices []ChoiceDescription, defaultChoice int) (int, error)
@@ -211,16 +215,18 @@ func (ui *NullHostUI) WriteWarningLine(_ string) {}
 func (ui *NullHostUI) WriteProgress(_ int64, _ *objects.ProgressRecord) {}
 
 // Prompt returns an empty dictionary.
-func (ui *NullHostUI) Prompt(_, _ string, descriptions []FieldDescription) (map[string]interface{}, error) {
+func (ui *NullHostUI) Prompt(_, _ string, _ []FieldDescription) (map[string]interface{}, error) {
 	return make(map[string]interface{}), nil
 }
 
 // PromptForCredential returns nil.
-func (ui *NullHostUI) PromptForCredential(_, _, userName, targetName string, allowedCredentialTypes CredentialTypes, options CredentialUIOptions) (*objects.PSCredential, error) {
+func (ui *NullHostUI) PromptForCredential(
+	_, _, _, _ string, _ CredentialTypes, _ CredentialUIOptions,
+) (*objects.PSCredential, error) {
 	return nil, nil
 }
 
 // PromptForChoice returns the default choice.
-func (ui *NullHostUI) PromptForChoice(_, _ string, choices []ChoiceDescription, defaultChoice int) (int, error) {
+func (ui *NullHostUI) PromptForChoice(_, _ string, _ []ChoiceDescription, defaultChoice int) (int, error) {
 	return defaultChoice, nil
 }

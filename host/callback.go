@@ -38,7 +38,7 @@ const (
 	MethodIDWrite2                 MethodID = 14 // Write(ConsoleColor foreground, ConsoleColor background, string value)
 	MethodIDWriteLine1             MethodID = 15 // WriteLine()
 	MethodIDWriteLine2             MethodID = 16 // WriteLine(string value)
-	MethodIDWriteLine3             MethodID = 17 // WriteLine(ConsoleColor foreground, ConsoleColor background, string value)
+	MethodIDWriteLine3             MethodID = 17 // WriteLine(ConsoleColor fg, bg, string)
 	MethodIDWriteErrorLine         MethodID = 18 // Write an error message
 	MethodIDWriteDebugLine         MethodID = 19 // Write debug output
 	MethodIDWriteProgress          MethodID = 20 // Write progress record
@@ -46,8 +46,9 @@ const (
 	MethodIDWriteWarningLine       MethodID = 22 // Write warning output
 	MethodIDPrompt                 MethodID = 23 // Prompt user with fields
 	MethodIDPromptForCredential1   MethodID = 24 // PromptForCredential(caption, message, userName, targetName)
-	MethodIDPromptForCredential2   MethodID = 25 // PromptForCredential(caption, message, userName, targetName, allowedCredentialTypes, options)
-	MethodIDPromptForChoice        MethodID = 26 // Prompt user to choose from options
+	// PromptForCredential2 has all params
+	MethodIDPromptForCredential2 MethodID = 25
+	MethodIDPromptForChoice      MethodID = 26 // Prompt user to choose from options
 )
 
 // PSHostRawUserInterface methods (27-51)
@@ -98,136 +99,78 @@ const (
 	DefaultCulture = "en-US"
 )
 
+// methodNames maps MethodID values to their string representations.
+var methodNames = map[MethodID]string{
+	// PSHost methods (1-8)
+	MethodIDGetName:             "GetName",
+	MethodIDGetVersion:          "GetVersion",
+	MethodIDGetInstanceID:       "GetInstanceId",
+	MethodIDGetCurrentCulture:   "GetCurrentCulture",
+	MethodIDGetCurrentUICulture: "GetCurrentUICulture",
+	MethodIDSetShouldExit:       "SetShouldExit",
+	MethodIDEnterNestedPrompt:   "EnterNestedPrompt",
+	MethodIDExitNestedPrompt:    "ExitNestedPrompt",
+	// Application notification methods (9-10)
+	MethodIDNotifyBeginApplication: "NotifyBeginApplication",
+	MethodIDNotifyEndApplication:   "NotifyEndApplication",
+	// PSHostUserInterface methods (11-26)
+	MethodIDReadLine:               "ReadLine",
+	MethodIDReadLineAsSecureString: "ReadLineAsSecureString",
+	MethodIDWrite1:                 "Write1",
+	MethodIDWrite2:                 "Write2",
+	MethodIDWriteLine1:             "WriteLine1",
+	MethodIDWriteLine2:             "WriteLine2",
+	MethodIDWriteLine3:             "WriteLine3",
+	MethodIDWriteErrorLine:         "WriteErrorLine",
+	MethodIDWriteDebugLine:         "WriteDebugLine",
+	MethodIDWriteProgress:          "WriteProgress",
+	MethodIDWriteVerboseLine:       "WriteVerboseLine",
+	MethodIDWriteWarningLine:       "WriteWarningLine",
+	MethodIDPrompt:                 "Prompt",
+	MethodIDPromptForCredential1:   "PromptForCredential1",
+	MethodIDPromptForCredential2:   "PromptForCredential2",
+	MethodIDPromptForChoice:        "PromptForChoice",
+	// RawUI methods (27-51)
+	MethodIDGetForegroundColor:       "GetForegroundColor",
+	MethodIDSetForegroundColor:       "SetForegroundColor",
+	MethodIDGetBackgroundColor:       "GetBackgroundColor",
+	MethodIDSetBackgroundColor:       "SetBackgroundColor",
+	MethodIDGetCursorPosition:        "GetCursorPosition",
+	MethodIDSetCursorPosition:        "SetCursorPosition",
+	MethodIDGetWindowPosition:        "GetWindowPosition",
+	MethodIDSetWindowPosition:        "SetWindowPosition",
+	MethodIDGetCursorSize:            "GetCursorSize",
+	MethodIDSetCursorSize:            "SetCursorSize",
+	MethodIDGetBufferSize:            "GetBufferSize",
+	MethodIDSetBufferSize:            "SetBufferSize",
+	MethodIDGetWindowSize:            "GetWindowSize",
+	MethodIDSetWindowSize:            "SetWindowSize",
+	MethodIDGetWindowTitle:           "GetWindowTitle",
+	MethodIDSetWindowTitle:           "SetWindowTitle",
+	MethodIDGetMaxWindowSize:         "GetMaxWindowSize",
+	MethodIDGetMaxPhysicalWindowSize: "GetMaxPhysicalWindowSize",
+	MethodIDGetKeyAvailable:          "GetKeyAvailable",
+	MethodIDReadKey:                  "ReadKey",
+	MethodIDFlushInputBuffer:         "FlushInputBuffer",
+	MethodIDSetBufferContents1:       "SetBufferContents1",
+	MethodIDSetBufferContents2:       "SetBufferContents2",
+	MethodIDGetBufferContents:        "GetBufferContents",
+	MethodIDScrollBufferContents:     "ScrollBufferContents",
+	// Runspace methods (52-55)
+	MethodIDPushRunspace:        "PushRunspace",
+	MethodIDPopRunspace:         "PopRunspace",
+	MethodIDGetIsRunspacePushed: "GetIsRunspacePushed",
+	MethodIDGetRunspace:         "GetRunspace",
+	// Additional methods (56)
+	MethodIDPromptForChoiceMultipleSelection: "PromptForChoiceMultipleSelection",
+}
+
 // String returns the string representation of a method ID.
 func (m MethodID) String() string {
-	switch m {
-	// PSHost methods (1-8)
-	case MethodIDGetName:
-		return "GetName"
-	case MethodIDGetVersion:
-		return "GetVersion"
-	case MethodIDGetInstanceID:
-		return "GetInstanceId"
-	case MethodIDGetCurrentCulture:
-		return "GetCurrentCulture"
-	case MethodIDGetCurrentUICulture:
-		return "GetCurrentUICulture"
-	case MethodIDSetShouldExit:
-		return "SetShouldExit"
-	case MethodIDEnterNestedPrompt:
-		return "EnterNestedPrompt"
-	case MethodIDExitNestedPrompt:
-		return "ExitNestedPrompt"
-
-	// Application notification methods (9-10)
-	case MethodIDNotifyBeginApplication:
-		return "NotifyBeginApplication"
-	case MethodIDNotifyEndApplication:
-		return "NotifyEndApplication"
-
-	// PSHostUserInterface methods (11-26)
-	case MethodIDReadLine:
-		return "ReadLine"
-	case MethodIDReadLineAsSecureString:
-		return "ReadLineAsSecureString"
-	case MethodIDWrite1:
-		return "Write1"
-	case MethodIDWrite2:
-		return "Write2"
-	case MethodIDWriteLine1:
-		return "WriteLine1"
-	case MethodIDWriteLine2:
-		return "WriteLine2"
-	case MethodIDWriteLine3:
-		return "WriteLine3"
-	case MethodIDWriteErrorLine:
-		return "WriteErrorLine"
-	case MethodIDWriteDebugLine:
-		return "WriteDebugLine"
-	case MethodIDWriteProgress:
-		return "WriteProgress"
-	case MethodIDWriteVerboseLine:
-		return "WriteVerboseLine"
-	case MethodIDWriteWarningLine:
-		return "WriteWarningLine"
-	case MethodIDPrompt:
-		return "Prompt"
-	case MethodIDPromptForCredential1:
-		return "PromptForCredential1"
-	case MethodIDPromptForCredential2:
-		return "PromptForCredential2"
-	case MethodIDPromptForChoice:
-		return "PromptForChoice"
-
-	// RawUI methods (27-51)
-	case MethodIDGetForegroundColor:
-		return "GetForegroundColor"
-	case MethodIDSetForegroundColor:
-		return "SetForegroundColor"
-	case MethodIDGetBackgroundColor:
-		return "GetBackgroundColor"
-	case MethodIDSetBackgroundColor:
-		return "SetBackgroundColor"
-	case MethodIDGetCursorPosition:
-		return "GetCursorPosition"
-	case MethodIDSetCursorPosition:
-		return "SetCursorPosition"
-	case MethodIDGetWindowPosition:
-		return "GetWindowPosition"
-	case MethodIDSetWindowPosition:
-		return "SetWindowPosition"
-	case MethodIDGetCursorSize:
-		return "GetCursorSize"
-	case MethodIDSetCursorSize:
-		return "SetCursorSize"
-	case MethodIDGetBufferSize:
-		return "GetBufferSize"
-	case MethodIDSetBufferSize:
-		return "SetBufferSize"
-	case MethodIDGetWindowSize:
-		return "GetWindowSize"
-	case MethodIDSetWindowSize:
-		return "SetWindowSize"
-	case MethodIDGetWindowTitle:
-		return "GetWindowTitle"
-	case MethodIDSetWindowTitle:
-		return "SetWindowTitle"
-	case MethodIDGetMaxWindowSize:
-		return "GetMaxWindowSize"
-	case MethodIDGetMaxPhysicalWindowSize:
-		return "GetMaxPhysicalWindowSize"
-	case MethodIDGetKeyAvailable:
-		return "GetKeyAvailable"
-	case MethodIDReadKey:
-		return "ReadKey"
-	case MethodIDFlushInputBuffer:
-		return "FlushInputBuffer"
-	case MethodIDSetBufferContents1:
-		return "SetBufferContents1"
-	case MethodIDSetBufferContents2:
-		return "SetBufferContents2"
-	case MethodIDGetBufferContents:
-		return "GetBufferContents"
-	case MethodIDScrollBufferContents:
-		return "ScrollBufferContents"
-
-	// Runspace methods (52-55)
-	case MethodIDPushRunspace:
-		return "PushRunspace"
-	case MethodIDPopRunspace:
-		return "PopRunspace"
-	case MethodIDGetIsRunspacePushed:
-		return "GetIsRunspacePushed"
-	case MethodIDGetRunspace:
-		return "GetRunspace"
-
-	// Additional methods (56)
-	case MethodIDPromptForChoiceMultipleSelection:
-		return "PromptForChoiceMultipleSelection"
-
-	default:
-		return fmt.Sprintf("Unknown(%d)", m)
+	if name, ok := methodNames[m]; ok {
+		return name
 	}
+	return fmt.Sprintf("Unknown(%d)", m)
 }
 
 // RemoteHostCall represents a host callback request from the server.
@@ -260,6 +203,8 @@ func NewCallbackHandler(host Host) *CallbackHandler {
 }
 
 // HandleCall processes a RemoteHostCall and returns a RemoteHostResponse.
+//
+//nolint:gocyclo // Method dispatch - inherent complexity from MS-PSRP spec
 func (h *CallbackHandler) HandleCall(call *RemoteHostCall) *RemoteHostResponse {
 	response := &RemoteHostResponse{
 		CallID:          call.CallID,
@@ -882,7 +827,8 @@ func (h *CallbackHandler) handlePromptForCredential1(call *RemoteHostCall) (inte
 	if h.host == nil || h.host.UI() == nil {
 		return nil, nil
 	}
-	return h.host.UI().PromptForCredential(caption, message, userName, targetName, CredentialTypeDefault, CredentialUIOptionNone)
+	return h.host.UI().PromptForCredential(
+		caption, message, userName, targetName, CredentialTypeDefault, CredentialUIOptionNone)
 }
 
 // handlePromptForCredential2 processes PromptForCredential2 method calls.

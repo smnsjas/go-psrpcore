@@ -1,3 +1,4 @@
+//nolint:lll // Test data XML strings are inherently long
 package serialization
 
 import (

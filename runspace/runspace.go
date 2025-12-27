@@ -504,7 +504,8 @@ func (p *Pool) receiveSessionCapability(ctx context.Context) error {
 
 	// Check if protocol version is compatible (we support 2.x)
 	if len(caps.ProtocolVersion) < 2 || caps.ProtocolVersion[0] != '2' {
-		return fmt.Errorf("%w: incompatible protocol version: server=%s, client=2.3", ErrProtocolViolation, caps.ProtocolVersion)
+		return fmt.Errorf(
+			"%w: incompatible protocol version: server=%s, client=2.3", ErrProtocolViolation, caps.ProtocolVersion)
 	}
 
 	// Store negotiated capabilities
@@ -777,11 +778,6 @@ func (p *Pool) CreatePipelineBuilder() (*pipeline.Pipeline, error) {
 	}()
 
 	return pl, nil
-}
-
-// removePipeline removes a pipeline from the pool's map.
-func (p *Pool) removePipeline(id uuid.UUID) {
-	p.pipelines.Delete(id)
 }
 
 // dispatchLoop processes incoming messages and routes them to pipelines.

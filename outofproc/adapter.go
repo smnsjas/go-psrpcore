@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -106,13 +107,18 @@ func (a *Adapter) readLoop() {
 
 		switch packet.Type {
 		case PacketTypeData:
+			// MS-PSRP OutOfProcess: The receiver MUST accept the message and respond with a <DataAck> message.
+			if err := a.transport.SendDataAck(packet.PSGuid); err != nil {
+				// Failed to send Ack - log but continue
+			}
+
 			a.readMu.Lock()
 			a.pending = append(a.pending, packet.Data)
-			a.readCond.Signal()
+			a.readCond.Broadcast() // Use Broadcast to ensure wake-up
 			a.readMu.Unlock()
 
 		case PacketTypeDataAck:
-			// Acknowledgment - could be used for flow control
+			// No-op
 
 		case PacketTypeCommandAck:
 			a.handlerMu.RLock()
@@ -129,10 +135,6 @@ func (a *Adapter) readLoop() {
 			if handler != nil {
 				handler(packet.PSGuid)
 			}
-			// If it's the session close, we're done
-			if IsSessionGUID(packet.PSGuid) {
-				return
-			}
 
 		case PacketTypeSignalAck:
 			a.handlerMu.RLock()
@@ -141,45 +143,72 @@ func (a *Adapter) readLoop() {
 			if handler != nil {
 				handler(packet.PSGuid)
 			}
+
+		case PacketTypeClose:
+			if err := a.transport.SendCloseAck(packet.PSGuid); err != nil {
+				// Log error but continue
+			}
+
+		case PacketTypeSignal:
+			if err := a.transport.SendSignalAck(packet.PSGuid); err != nil {
+				// Log error but continue
+			}
 		}
 	}
 }
 
-// Read implements io.Reader, returning fragment data.
-// This blocks until data is available or the adapter is closed.
-func (a *Adapter) Read(p []byte) (int, error) {
+// Read reads up to len(p) bytes from the pending buffers.
+// It blocks until data is available, an error occurs, or the context is cancelled.
+// Read reads up to len(p) bytes from the pending buffers.
+// It blocks until data is available, an error occurs, or the context is cancelled.
+func (a *Adapter) Read(p []byte) (n int, err error) {
 	a.readMu.Lock()
 	defer a.readMu.Unlock()
 
-	// First drain any buffered data
-	if a.readBuf.Len() > 0 {
-		return a.readBuf.Read(p)
-	}
+	// Wait for data with periodic wakeup to check for closure
+	// This prevents hanging if a signal is missed or connection drops silently
+	deadline := time.Now().Add(30 * time.Second)
 
-	// Wait for data
 	for len(a.pending) == 0 && !a.closed && a.readErr == nil {
-		a.readCond.Wait()
-	}
+		// Release lock while waiting
+		a.readCond.L.Unlock()
 
-	// Check for pending data FIRST (before errors)
-	// This ensures we return all buffered data even after EOF/error
-	if len(a.pending) > 0 {
-		data := a.pending[0]
-		a.pending = a.pending[1:]
-
-		// If it fits in p, return directly
-		if len(data) <= len(p) {
-			copy(p, data)
-			return len(data), nil
+		// Use a short wait to allow checking context periodically
+		// We can't use readCond.Wait() because it can't be interrupted by context
+		timer := time.NewTimer(1 * time.Second)
+		select {
+		case <-timer.C:
+			// Timer fired, loop around to check condition/deadline
+		case <-a.ctx.Done():
+			timer.Stop()
+			a.readCond.L.Lock()
+			return 0, a.ctx.Err()
 		}
 
-		// Otherwise buffer the excess
-		copy(p, data[:len(p)])
-		a.readBuf.Write(data[len(p):])
-		return len(p), nil
+		a.readCond.L.Lock()
+
+		if time.Now().After(deadline) {
+			// One last check if data arrived
+			if len(a.pending) > 0 || a.closed || a.readErr != nil {
+				break
+			}
+			return 0, fmt.Errorf("read timeout: no data received in 30s")
+		}
 	}
 
-	// No data available - check error conditions
+	if len(a.pending) > 0 {
+		// Copy data from the first pending buffer
+		n = copy(p, a.pending[0])
+		if n == len(a.pending[0]) {
+			// Consumed the entire buffer, remove it
+			a.pending = a.pending[1:]
+		} else {
+			// Partial read, update the pending buffer
+			a.pending[0] = a.pending[0][n:]
+		}
+		return n, nil
+	}
+
 	if a.readErr != nil {
 		return 0, a.readErr
 	}
@@ -188,16 +217,16 @@ func (a *Adapter) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	return 0, io.EOF
+	return 0, nil
 }
 
 // Write implements io.Writer, sending fragment data.
 // For session-level operations (runspace pool), data is sent with the NULL GUID.
-// This is correct for SESSION_CAPABILITY, INIT_RUNSPACEPOOL, and other runspace messages.
 func (a *Adapter) Write(p []byte) (int, error) {
-	// Session-level data always uses NULL GUID in OutOfProcess protocol
-	// The runspace.Pool only sends session-level data through this interface.
-	// Pipeline-specific data is handled via SendPipelineData().
+	// Throttle writes slightly to avoid overwhelming the vmicvmsession service,
+	// which is known to be sensitive to packet flooding (causing potential hangs).
+	time.Sleep(2 * time.Millisecond)
+
 	err := a.transport.SendData(NullGUID, p)
 	if err != nil {
 		return 0, err
@@ -212,6 +241,8 @@ func (a *Adapter) SendCommand(pipelineGUID uuid.UUID) error {
 
 // SendPipelineData sends fragment data for a specific pipeline.
 func (a *Adapter) SendPipelineData(pipelineGUID uuid.UUID, data []byte) error {
+	// Throttle writes slightly to avoid overwhelming the VM service
+	time.Sleep(2 * time.Millisecond)
 	return a.transport.SendData(pipelineGUID, data)
 }
 
@@ -221,12 +252,57 @@ func (a *Adapter) SendSignal(pipelineGUID uuid.UUID) error {
 }
 
 // Close shuts down the adapter.
+//
+// IMPORTANT: We intentionally do NOT send OutOfProc Close packets here.
+// The PSRP-level RUNSPACEPOOL_STATE(Closed) message (sent by Pool.Close())
+// is sufficient for the server to clean up. Sending additional OutOfProc
+// Close packets after the PSRP close can confuse the vmicvmsession service
+// and cause subsequent connections to hang.
+//
+// This matches the behavior of "killing" the client, which we observed
+// successfully clears the server state.
 func (a *Adapter) Close() error {
+	// 1. Give server a moment to process the PSRP close (which happened in Pool.Close)
+	time.Sleep(200 * time.Millisecond)
+
+	// 2. Just cancel the context to stop readLoop and release resources.
+	// We rely on the subsequent socket close (in backend) to signal EOF to server.
 	a.cancel()
 
-	// Send close for the session
-	if err := a.transport.SendClose(NullGUID); err != nil {
-		return fmt.Errorf("send close: %w", err)
+	// 3. Brief wait for readLoop to exit
+	time.Sleep(100 * time.Millisecond)
+
+	return nil
+}
+
+// ClosePipeline sends a Close message for a specific pipeline and waits for CloseAck.
+// NOTE: This is typically not needed - pipelines complete naturally and the server
+// cleans them up. Only use this if you need to forcibly terminate a running pipeline.
+func (a *Adapter) ClosePipeline(pipelineID uuid.UUID) error {
+	closeAckCh := make(chan struct{}, 1)
+
+	originalHandler := a.onCloseAck
+	a.SetCloseAckHandler(func(psGuid uuid.UUID) {
+		if psGuid == pipelineID {
+			select {
+			case closeAckCh <- struct{}{}:
+			default:
+			}
+		}
+		if originalHandler != nil {
+			originalHandler(psGuid)
+		}
+	})
+	defer a.SetCloseAckHandler(originalHandler)
+
+	if err := a.transport.SendClose(pipelineID); err != nil {
+		return fmt.Errorf("send pipeline close: %w", err)
+	}
+
+	select {
+	case <-closeAckCh:
+	case <-time.After(2 * time.Second):
+	case <-a.ctx.Done():
 	}
 
 	return nil

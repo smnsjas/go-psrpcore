@@ -51,6 +51,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/smnsjas/go-psrpcore/fragments"
@@ -397,7 +398,7 @@ func (p *Pool) StartDispatchLoop() {
 }
 
 // Close closes the runspace pool.
-// Transitions from Opened → Closing → Closed.
+// Transitions from Opened → Closing → (wait) → Closed.
 func (p *Pool) Close(ctx context.Context) error {
 	p.mu.Lock()
 	currentState := p.state
@@ -431,9 +432,29 @@ func (p *Pool) Close(ctx context.Context) error {
 	closeMsg := messages.NewRunspacePoolStateMessage(p.id, messages.RunspacePoolStateClosed, closeData)
 	_ = p.sendMessage(ctx, closeMsg)
 
-	// Transition to Closed
+	// Wait for server to acknowledge and close (via dispatchLoop -> cleanup)
+	// Or timeout if server is unresponsive
+	// We use a very short timeout (100ms) because for OutOfProcess transports,
+	// the server often doesn't ack cleanly, and we don't want to make the user wait.
+	// The backend.Close() will handle the actual resource cleanup (socket close/process kill).
+	p.logf("[pool] Waiting for server Clean close (timeout 100ms)...")
+	select {
+	case <-p.doneCh:
+		// Clean exit triggered by server response
+		p.logf("[pool] Server acknowledged close (Clean)")
+	case <-time.After(100 * time.Millisecond):
+		// Timeout - force clean up locally
+		p.logf("[pool] Timeout waiting for server close")
+		p.cleanup(StateClosed, nil)
+	case <-ctx.Done():
+		// Context cancelled - force cleanup might be needed or just exit
+		p.logf("[pool] Context cancelled during close")
+		p.cleanup(StateClosed, ctx.Err())
+	}
+
+	// cleanup() handles state transition and doneCh closing.
+	// We also need to cancel the context to stop any background workers.
 	p.mu.Lock()
-	p.setState(StateClosed)
 	p.cancel()
 	p.mu.Unlock()
 
@@ -835,30 +856,59 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 
 		case messages.MessageTypeRunspacePoolState:
 			// Handle state changes if any (e.g. Broken/Closed from server)
-			// Note: GET_COMMAND_METADATA responses come via PIPELINE_OUTPUT messages,
-			// not a separate message type. The GetCommandMetadata implementation
-			// should create a pipeline to receive responses per MS-PSRP section 3.1.4.5.
+			stateInfo, err := parseRunspacePoolState(msg.Data)
+			if err != nil {
+				// Failed to parse state... ignore or log?
+				continue
+			}
+
+			switch stateInfo.State {
+			case messages.RunspacePoolStateClosed:
+				// Clean shutdown confirmed by server
+				p.cleanup(StateClosed, nil)
+				return // Exit loop
+
+			case messages.RunspacePoolStateBroken:
+				// Server reported broken state
+				p.cleanup(StateBroken, fmt.Errorf("server reported broken state"))
+				return // Exit loop
+			}
 		}
 	}
 }
 
 // handleTransportError handles a transport error by transitioning to broken state
 // and cleaning up all resources. It uses sync.Once to ensure cleanup only happens once.
+// handleTransportError handles a transport error by transitioning to broken state
+// and cleaning up all resources.
 func (p *Pool) handleTransportError(err error) {
+	p.cleanup(StateBroken, err)
+}
+
+// cleanup handles resource cleanup and state transition.
+// It uses cleanupOnce to ensure it only runs once (whether for error or clean close).
+func (p *Pool) cleanup(endState State, err error) {
 	p.cleanupOnce.Do(func() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 
-		// Store the error that caused the breakdown
-		p.cleanupError = err
+		// Store the error if any
+		if err != nil {
+			p.cleanupError = err
+		}
 
-		// Transition to broken state
-		p.setState(StateBroken)
+		// Transition to end state
+		p.setState(endState)
 
 		// Close all pipeline channels by transitioning them to failed state
+		// (For clean close, they should already be done, but safety check)
 		p.pipelines.Range(func(_, value interface{}) bool {
 			pl := value.(*pipeline.Pipeline)
-			pl.Fail(fmt.Errorf("runspace pool broken: %w", err))
+			if err != nil {
+				pl.Fail(fmt.Errorf("runspace pool broken: %w", err))
+			} else {
+				pl.Cancel()
+			}
 			return true
 		})
 

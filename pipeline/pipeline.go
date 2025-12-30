@@ -153,7 +153,7 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 // Use AddCommand/AddParameter to build the pipeline.
 func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Pipeline{
+	p := &Pipeline{
 		id:             uuid.New(),
 		runspaceID:     runspaceID,
 		state:          StateNotStarted,
@@ -171,6 +171,9 @@ func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 		cancel:         cancel,
 		channelTimeout: DefaultChannelTimeout,
 	}
+	// Default to NoInput=true for now (matches existing client behavior assumption)
+	p.powerShell.NoInput = true
+	return p
 }
 
 // SkipInvokeSend prevents Invoke from sending the CreatePipeline message.

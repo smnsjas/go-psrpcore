@@ -1,7 +1,6 @@
 package outofproc
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -19,7 +18,6 @@ type Adapter struct {
 	runspaceGUID uuid.UUID
 
 	// Read state
-	readBuf  bytes.Buffer
 	readMu   sync.Mutex
 	notifyCh chan struct{}
 
@@ -118,7 +116,7 @@ func (a *Adapter) readLoop() {
 		case PacketTypeData:
 			// MS-PSRP OutOfProcess: The receiver MUST accept the message and respond with a <DataAck> message.
 			if err := a.transport.SendDataAck(packet.PSGuid); err != nil {
-				// Failed to send Ack - log but continue
+				_ = err // Best-effort Ack, continue on error
 			}
 
 			a.readMu.Lock()
@@ -160,19 +158,17 @@ func (a *Adapter) readLoop() {
 
 		case PacketTypeClose:
 			if err := a.transport.SendCloseAck(packet.PSGuid); err != nil {
-				// Log error but continue
+				_ = err // Best-effort Ack, continue on error
 			}
 
 		case PacketTypeSignal:
 			if err := a.transport.SendSignalAck(packet.PSGuid); err != nil {
-				// Log error but continue
+				_ = err // Best-effort Ack, continue on error
 			}
 		}
 	}
 }
 
-// Read reads up to len(p) bytes from the pending buffers.
-// It blocks until data is available, an error occurs, or the context is cancelled.
 // Read reads up to len(p) bytes from the pending buffers.
 // It blocks until data is available, an error occurs, or the context is cancelled.
 func (a *Adapter) Read(p []byte) (n int, err error) {

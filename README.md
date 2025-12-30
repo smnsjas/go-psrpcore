@@ -87,21 +87,23 @@ This library is designed to be composed with transport implementations:
 
 | Transport | Use Case | Example Project |
 |-----------|----------|-----------------|
-| **AF_HYPERV / VMBus** | PowerShell Direct to Hyper-V VMs | [go-psdirect](https://github.com/jasonmfehr/go-psdirect) |
-| **WSMan / HTTP(S)** | Traditional WinRM remoting | Combine with [masterzen/winrm](https://github.com/masterzen/winrm) |
+| **AF_HYPERV / VMBus** | PowerShell Direct to Hyper-V VMs | [go-psrp](https://github.com/smnsjas/go-psrp) |
+| **WSMan / HTTP(S)** | Traditional WinRM remoting | [go-psrp](https://github.com/smnsjas/go-psrp) |
 | **SSH** | PowerShell Core remoting | Use `golang.org/x/crypto/ssh` |
 | **Named Pipes** | Local PowerShell remoting | Use OS-specific pipe APIs |
 
 ## Package Structure
 
 ```
-go-psrp/
-├── psrp.go              # Main package - Client, RunspacePool, PowerShell
+go-psrpcore/
+├── runspace/            # RunspacePool management
+├── pipeline/            # Pipeline execution
 ├── messages/            # PSRP message type definitions
 ├── fragments/           # Message fragmentation/reassembly
 ├── serialization/       # CLIXML serialization
 ├── objects/             # PowerShell complex objects
-└── host/                # Host callback interface
+├── host/                # Host callback interface
+└── outofproc/           # OutOfProcess transport adapter (for HVSocket/SSH)
 ```
 
 ## Architecture
@@ -143,12 +145,12 @@ We maintain detailed design documentation and performance analysis in the `docs/
 
 See [docs/README.md](docs/README.md) for the full index.
 
-
 ## Testing
 
 This library uses a **Sans-IO** design, making it easy to test without a live PowerShell server.
 
 ### Functional Tests
+
 We provide a comprehensive functional test suite that simulates a PSRP server over a mock transport. This verifies the complete handshake and execution flow.
 
 ```bash
@@ -156,6 +158,7 @@ go test -v ./runspace -run TestEndToEndFunctional
 ```
 
 ### Unit Tests
+
 Run the full test suite (including sub-packages):
 
 ```bash
@@ -175,6 +178,7 @@ Contributions are welcome! We follow standard Go project guidelines.
 ### Reporting Bugs
 
 Please open an issue on GitHub with:
+
 1. A clear description of the bug
 2. Minimal reproduction steps
 3. Full stack trace (if applicable)

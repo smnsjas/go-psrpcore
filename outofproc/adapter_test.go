@@ -262,8 +262,11 @@ func TestAdapterClose(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
+	// IMPORTANT: Close() intentionally does NOT send OutOfProc Close packets.
+	// The PSRP-level close (sent by Pool.Close) is sufficient, and sending
+	// additional OutOfProc Close can confuse vmicvmsession service.
 	output := buf.String()
-	if !strings.Contains(output, "<Close PSGuid='00000000-0000-0000-0000-000000000000' />") {
-		t.Errorf("Close() did not send close packet, got: %s", output)
+	if output != "" {
+		t.Errorf("Close() should not send any packets, got: %s", output)
 	}
 }

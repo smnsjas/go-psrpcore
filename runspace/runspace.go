@@ -1235,6 +1235,8 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 }
 
 // logf logs a debug message if a logger is configured.
+//
+//nolint:unparam // v is intentionally variadic for future use
 func (p *Pool) logf(format string, v ...interface{}) {
 	p.mu.RLock()
 	logger := p.logger

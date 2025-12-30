@@ -19,8 +19,9 @@ type Adapter struct {
 	runspaceGUID uuid.UUID
 
 	// Read state
-	readBuf bytes.Buffer
-	readMu  sync.Mutex
+	readBuf  bytes.Buffer
+	readMu   sync.Mutex
+	notifyCh chan struct{}
 
 	// Background reader state
 	pending [][]byte
@@ -47,6 +48,7 @@ func NewAdapter(transport *Transport, runspaceGUID uuid.UUID) *Adapter {
 		transport:    transport,
 		runspaceGUID: runspaceGUID,
 		pending:      make([][]byte, 0, 16),
+		notifyCh:     make(chan struct{}, 1),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -85,6 +87,11 @@ func (a *Adapter) readLoop() {
 		a.closed = true
 
 		a.readMu.Unlock()
+		// Signaling cleanup
+		select {
+		case a.notifyCh <- struct{}{}:
+		default:
+		}
 	}()
 
 	for {
@@ -99,6 +106,11 @@ func (a *Adapter) readLoop() {
 			a.readMu.Lock()
 			a.readErr = err
 			a.readMu.Unlock()
+			// Signal error
+			select {
+			case a.notifyCh <- struct{}{}:
+			default:
+			}
 			return
 		}
 
@@ -113,6 +125,11 @@ func (a *Adapter) readLoop() {
 			a.pending = append(a.pending, packet.Data)
 
 			a.readMu.Unlock()
+			// Signal data availability
+			select {
+			case a.notifyCh <- struct{}{}:
+			default:
+			}
 
 		case PacketTypeDataAck:
 			// No-op
@@ -170,12 +187,16 @@ func (a *Adapter) Read(p []byte) (n int, err error) {
 		// Release lock while waiting
 		a.readMu.Unlock()
 
-		// Use a short wait to allow checking context periodically
-		// We can't use readCond.Wait() because it can't be interrupted by context
+		// Use notifyCh for instant wake-up, fallback to timer for periodic checks
 		timer := time.NewTimer(1 * time.Second)
 		select {
+		case <-a.notifyCh:
+			// Data arrived or state changed
+			if !timer.Stop() {
+				<-timer.C
+			}
 		case <-timer.C:
-			// Timer fired, loop around to check condition/deadline
+			// Timer fired, loop around
 		case <-a.ctx.Done():
 			timer.Stop()
 			a.readMu.Lock()

@@ -194,6 +194,40 @@ func (t *Transport) SendDataAck(psGUID uuid.UUID) error {
 	return err
 }
 
+// SendCloseAck sends a close acknowledgment (response to server Close).
+func (t *Transport) SendCloseAck(psGUID uuid.UUID) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	buf := sendBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer sendBufferPool.Put(buf)
+
+	buf.WriteString("<CloseAck PSGuid='")
+	buf.WriteString(formatGUID(psGUID))
+	buf.WriteString("' />\n")
+
+	_, err := t.writer.Write(buf.Bytes())
+	return err
+}
+
+// SendSignalAck sends a signal acknowledgment (response to server Signal).
+func (t *Transport) SendSignalAck(psGUID uuid.UUID) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	buf := sendBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer sendBufferPool.Put(buf)
+
+	buf.WriteString("<SignalAck PSGuid='")
+	buf.WriteString(formatGUID(psGUID))
+	buf.WriteString("' />\n")
+
+	_, err := t.writer.Write(buf.Bytes())
+	return err
+}
+
 // ReceivePacket reads and parses the next packet from the transport.
 // It blocks until a complete packet is received or an error occurs.
 func (t *Transport) ReceivePacket() (*Packet, error) {

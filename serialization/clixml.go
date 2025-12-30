@@ -1761,7 +1761,7 @@ func PowerShellToPSObject(p *objects.PowerShell) *PSObject {
 	}
 
 	// 3. Add properties to Root (as Members, per MS-PSRP spec example)
-	root.Members["NoInput"] = true
+	root.Members["NoInput"] = p.NoInput
 	// ApartmentState: pypsrp uses System.Management.Automation.Runspaces.ApartmentState
 	root.Members["ApartmentState"] = &PSRPEnum{
 		Type:     "System.Management.Automation.Runspaces.ApartmentState",

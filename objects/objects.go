@@ -326,6 +326,7 @@ type Command struct {
 type PowerShell struct {
 	Commands []Command
 	IsNested bool
+	NoInput  bool   // If true, the client MUST NOT send any input (MS-PSRP 2.2.2.10)
 	History  string // "Add", "Clear", "None"
 }
 

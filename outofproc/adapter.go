@@ -19,9 +19,8 @@ type Adapter struct {
 	runspaceGUID uuid.UUID
 
 	// Read state
-	readBuf  bytes.Buffer
-	readMu   sync.Mutex
-	readCond *sync.Cond
+	readBuf bytes.Buffer
+	readMu  sync.Mutex
 
 	// Background reader state
 	pending [][]byte
@@ -51,7 +50,6 @@ func NewAdapter(transport *Transport, runspaceGUID uuid.UUID) *Adapter {
 		ctx:          ctx,
 		cancel:       cancel,
 	}
-	a.readCond = sync.NewCond(&a.readMu)
 
 	// Start background reader
 	go a.readLoop()
@@ -85,7 +83,7 @@ func (a *Adapter) readLoop() {
 	defer func() {
 		a.readMu.Lock()
 		a.closed = true
-		a.readCond.Broadcast()
+
 		a.readMu.Unlock()
 	}()
 
@@ -100,7 +98,6 @@ func (a *Adapter) readLoop() {
 		if err != nil {
 			a.readMu.Lock()
 			a.readErr = err
-			a.readCond.Broadcast() // Wake up any waiting readers
 			a.readMu.Unlock()
 			return
 		}
@@ -114,7 +111,7 @@ func (a *Adapter) readLoop() {
 
 			a.readMu.Lock()
 			a.pending = append(a.pending, packet.Data)
-			a.readCond.Broadcast() // Use Broadcast to ensure wake-up
+
 			a.readMu.Unlock()
 
 		case PacketTypeDataAck:
@@ -171,7 +168,7 @@ func (a *Adapter) Read(p []byte) (n int, err error) {
 
 	for len(a.pending) == 0 && !a.closed && a.readErr == nil {
 		// Release lock while waiting
-		a.readCond.L.Unlock()
+		a.readMu.Unlock()
 
 		// Use a short wait to allow checking context periodically
 		// We can't use readCond.Wait() because it can't be interrupted by context
@@ -181,11 +178,11 @@ func (a *Adapter) Read(p []byte) (n int, err error) {
 			// Timer fired, loop around to check condition/deadline
 		case <-a.ctx.Done():
 			timer.Stop()
-			a.readCond.L.Lock()
+			a.readMu.Lock()
 			return 0, a.ctx.Err()
 		}
 
-		a.readCond.L.Lock()
+		a.readMu.Lock()
 
 		if time.Now().After(deadline) {
 			// One last check if data arrived

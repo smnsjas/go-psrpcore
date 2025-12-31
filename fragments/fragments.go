@@ -210,6 +210,14 @@ func NewFragmenterWithID(maxSize int, currentObjectID uint64) *Fragmenter {
 	}
 }
 
+// SetObjectID sets the current object ID counter.
+// The next fragment generated will use objectID + 1.
+// This is useful for synchronizing sequence numbers when handshake messages
+// are sent via an alternate path (e.g., WSMan creationXml).
+func (f *Fragmenter) SetObjectID(id uint64) {
+	f.objectID = id
+}
+
 // Fragment splits data into one or more fragments.
 func (f *Fragmenter) Fragment(data []byte) ([]*Fragment, error) {
 	f.objectID++

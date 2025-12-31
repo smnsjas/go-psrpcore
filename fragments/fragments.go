@@ -177,7 +177,7 @@ func (f *Fragment) Release() {
 		// For now, we pool everything that fits the initial capacity or larger,
 		// but typically we might want to discard very large ones.
 		// The roadmap suggested simple pooling.
-		//nolint:staticcheck // SA6002: overhead of pointer pool is higher than value pool for small slices here
+		//lint:ignore SA6002 overhead of pointer pool is higher than value pool for small slices here
 		fragmentDataPool.Put(f.Data)
 		f.Data = nil
 	}

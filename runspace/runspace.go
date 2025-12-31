@@ -50,6 +50,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -254,6 +257,13 @@ func (p *Pool) SetLogger(logger Logger) error {
 	return nil
 }
 
+// EnableDebugLogging enables debug logging to stderr using the standard log package.
+func (p *Pool) EnableDebugLogging() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.logger = log.New(os.Stderr, "[psrp] ", log.LstdFlags)
+}
+
 // Host returns the host implementation associated with the runspace pool.
 func (p *Pool) Host() host.Host {
 	p.mu.RLock()
@@ -273,6 +283,16 @@ func (p *Pool) State() State {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.state
+}
+
+// SetMessageID sets the current message ID sequence number.
+// This is useful when handshake messages were sent via an alternate path
+// (e.g., WSMan creationXml sends SESSION_CAPABILITY and INIT_RUNSPACEPOOL).
+// The next message sent will use id + 1.
+func (p *Pool) SetMessageID(id uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.fragmenter.SetObjectID(id)
 }
 
 // SetMinRunspaces sets the minimum number of runspaces in the pool.
@@ -814,10 +834,38 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 
 		msg, err := p.receiveMessage(ctx)
 		if err != nil {
-			// Transport error - transition to broken state and clean up
+			// Check for context cancellation (normal shutdown)
+			if ctx.Err() != nil {
+				p.logf("[dispatch] exiting: context cancelled")
+				return
+			}
+
+			// Check for transient errors that shouldn't break the pool
+			// EOF can happen when there's no more data but pool is still valid
+			errStr := err.Error()
+			if strings.Contains(errStr, "EOF") ||
+				strings.Contains(errStr, "timeout") ||
+				strings.Contains(errStr, "context canceled") {
+				p.logf("[dispatch] transient error: %v", err)
+				// Check if we should continue or exit
+				p.mu.RLock()
+				closed := p.state == StateClosed || p.state == StateBroken
+				p.mu.RUnlock()
+				if closed {
+					p.logf("[dispatch] exiting: pool closed/broken")
+					return
+				}
+				// Transient error, continue polling
+				continue
+			}
+
+			// Fatal transport error - transition to broken state
+			p.logf("[dispatch] fatal error: %v", err)
 			p.handleTransportError(err)
 			return
 		}
+
+		p.logf("[dispatch] received message type=0x%08X pipeline=%s", uint32(msg.Type), msg.PipelineID)
 
 		// Dispatch based on PipelineID
 		if msg.PipelineID != uuid.Nil {
@@ -825,13 +873,17 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 
 			if exists {
 				pl := val.(*pipeline.Pipeline)
+				p.logf("[dispatch] routing to pipeline %s", msg.PipelineID)
 				// HandleMessage can block with timeout if pipeline's channel buffers are full.
 				// This provides back-pressure to prevent unbounded memory growth.
 				if err := pl.HandleMessage(msg); err != nil {
 					// If HandleMessage fails (buffer timeout or context cancelled),
 					// mark the pipeline as failed to signal the error to the consumer.
+					p.logf("[dispatch] HandleMessage failed: %v", err)
 					pl.Fail(err)
 				}
+			} else {
+				p.logf("[dispatch] pipeline %s not found!", msg.PipelineID)
 			}
 			continue
 		}

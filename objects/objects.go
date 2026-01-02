@@ -324,17 +324,30 @@ type Command struct {
 // PowerShell represents a pipeline of commands to be executed.
 // This structure corresponds to the serialized object graph sent in CREATE_PIPELINE.
 type PowerShell struct {
-	Commands []Command
-	IsNested bool
-	NoInput  bool   // If true, the client MUST NOT send any input (MS-PSRP 2.2.2.10)
-	History  string // "Add", "Clear", "None"
+	Commands                         []Command
+	IsNested                         bool      `xml:"IsNested"`
+	NoInput                          bool      `xml:"NoInput"` // If true, the client MUST NOT send any input (MS-PSRP 2.2.2.10)
+	ApartmentState                   int       `xml:"ApartmentState"`
+	RemoteStreamOptions              int       `xml:"RemoteStreamOptions"`
+	AddToHistory                     bool      `xml:"AddToHistory"`
+	HostInfo                         *HostInfo `xml:"HostInfo"`
+	RedirectShellErrorOutputToOutput bool      `xml:"RedirectShellErrorOutputToOutput"`
 }
 
 // NewPowerShell creates a new PowerShell pipeline object.
 func NewPowerShell() *PowerShell {
 	return &PowerShell{
-		Commands: make([]Command, 0),
-		History:  "", // Empty string instead of "None"
+		Commands:            make([]Command, 0),
+		ApartmentState:      0,     // Unknown
+		RemoteStreamOptions: 0,     // None
+		AddToHistory:        false, // Default
+		HostInfo: &HostInfo{
+			HostDefaultData: &HostDefaultData{Data: make(map[string]interface{})},
+			IsHostNull:      true,
+			IsHostUINull:    true,
+			IsHostRawUINull: true,
+			UseRunspaceHost: true,
+		},
 	}
 }
 

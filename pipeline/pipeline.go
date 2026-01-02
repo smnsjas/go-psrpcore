@@ -129,7 +129,7 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 	ps.AddCommand(command, true)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Pipeline{
+	p := &Pipeline{
 		id:             uuid.New(),
 		runspaceID:     runspaceID,
 		state:          StateNotStarted,
@@ -147,6 +147,10 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 		cancel:         cancel,
 		channelTimeout: DefaultChannelTimeout,
 	}
+	// Default to NoInput=true for scripts (Execute semantics).
+	// Callers that want to stream input should use NewBuilder or explicitly set NoInput=false.
+	p.powerShell.NoInput = true
+	return p
 }
 
 // NewBuilder creates a new Pipeline with an empty command list.

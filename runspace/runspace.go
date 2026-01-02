@@ -104,6 +104,8 @@ const (
 	StateBeforeOpen State = iota
 	// StateOpening indicates capability exchange and initialization in progress.
 	StateOpening
+	// StateConnecting indicates reconnection to an existing runspace pool.
+	StateConnecting
 	// StateOpened indicates the pool is ready for use.
 	StateOpened
 	// StateClosing indicates the pool is being closed.
@@ -132,6 +134,8 @@ func (s State) String() string {
 		return "BeforeOpen"
 	case StateOpening:
 		return "Opening"
+	case StateConnecting:
+		return "Connecting"
 	case StateOpened:
 		return "Opened"
 	case StateClosing:
@@ -402,6 +406,50 @@ func (p *Pool) Open(ctx context.Context) error {
 	return nil
 }
 
+// Connect connects to an existing runspace pool (Reconnection).
+// It assumes the session capability exchange has happened or will happen similarly to Open,
+// but sends CONNECT_RUNSPACEPOOL instead of INIT_RUNSPACEPOOL.
+func (p *Pool) Connect(ctx context.Context) error {
+	p.mu.Lock()
+	if p.state != StateBeforeOpen {
+		p.mu.Unlock()
+		return ErrAlreadyOpen
+	}
+	p.state = StateConnecting
+	p.ctx = ctx
+	p.mu.Unlock()
+
+	// 1. Start message dispatch loop
+	// For reconnection, we typically expect the receive loop to handle incoming messages
+	p.StartDispatchLoop()
+
+	// 2. Send SESSION_CAPABILITY
+	if !p.SkipHandshakeSend {
+		if err := p.sendSessionCapability(ctx); err != nil {
+			return fmt.Errorf("send session capability: %w", err)
+		}
+	}
+
+	// 3. Send CONNECT_RUNSPACEPOOL
+	// Payload is typically same as Init, or minimal.
+	// For now, we use the same Min/Max runspaces payload.
+	if !p.SkipHandshakeSend {
+		if err := p.sendConnectRunspacePool(ctx); err != nil {
+			return fmt.Errorf("send connect runspace pool: %w", err)
+		}
+
+		// 4. Wait for state to be Opened
+		return p.waitForOpened(ctx)
+	}
+
+	// For reconnection (SkipHandshakeSend=true), the pool is already opened on the server.
+	// We just need to transition our local state and start receiving.
+	p.mu.Lock()
+	p.setState(StateOpened)
+	p.mu.Unlock()
+	return nil
+}
+
 // StartDispatchLoop starts the message dispatch loop.
 // This should be called after configuring the transport when using creationXml flow
 // (SkipHandshakeSend = true). For normal handshake flow, the loop is started automatically.
@@ -415,6 +463,76 @@ func (p *Pool) StartDispatchLoop() {
 
 	p.dispatchLoopStarted = true
 	go p.dispatchLoop(p.ctx)
+}
+
+// ResumeOpened sets the pool state to Opened without sending any PSRP messages.
+// This is used when reconnecting to an already-opened RunspacePool.
+func (p *Pool) ResumeOpened() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.state = StateOpened
+}
+
+// ProcessConnectResponse processes the PSRP response data from WSManConnectShellEx.
+// This data contains the server's response to our SESSION_CAPABILITY and CONNECT_RUNSPACEPOOL
+// messages that were piggybacked in the Connect request.
+func (p *Pool) ProcessConnectResponse(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	p.logf("[connect] Processing %d bytes of connect response data", len(data))
+
+	// The response data contains PSRP fragments. We need to decode and process them.
+	// This typically includes:
+	// 1. SESSION_CAPABILITY response
+	// 2. CONNECT_RUNSPACEPOOL response (or RUNSPACEPOOL_STATE indicating Opened)
+
+	// Feed the data through the fragment assembler
+	offset := 0
+	for offset < len(data) {
+		// Check if we have enough data for a fragment header
+		if offset+fragments.HeaderSize > len(data) {
+			break
+		}
+
+		// Get blob length from header
+		blobLen := binary.BigEndian.Uint32(data[offset+17 : offset+21])
+		fragLen := fragments.HeaderSize + int(blobLen)
+
+		if offset+fragLen > len(data) {
+			return fmt.Errorf("incomplete fragment at offset %d", offset)
+		}
+
+		// Decode fragment
+		frag, err := fragments.Decode(data[offset : offset+fragLen])
+		if err != nil {
+			return fmt.Errorf("decode fragment at offset %d: %w", offset, err)
+		}
+
+		// Assemble message
+		complete, msgData, err := p.assembler.Add(frag)
+		if err != nil {
+			return fmt.Errorf("assemble fragment: %w", err)
+		}
+
+		if complete {
+			// Decode and process message
+			msg, err := messages.Decode(msgData)
+			if err != nil {
+				p.logf("[connect] Warning: failed to decode message: %v", err)
+			} else {
+				p.logf("[connect] Received message type=0x%08X", uint32(msg.Type))
+				// We can optionally process these messages, but for connect
+				// we mainly care that they don't error - the state is set
+				// to Opened by ResumeOpened() regardless.
+			}
+		}
+
+		offset += fragLen
+	}
+
+	return nil
 }
 
 // Close closes the runspace pool.
@@ -518,7 +636,7 @@ func (p *Pool) createSessionCapabilityMessage() *messages.Message {
 	capabilityData := []byte(`<Obj RefId="0"><MS><Version N="protocolversion">2.3</Version>` +
 		`<Version N="PSVersion">2.0</Version><Version N="SerializationVersion">1.1.0.1</Version></MS></Obj>`)
 
-	return messages.NewSessionCapability(uuid.Nil, capabilityData)
+	return messages.NewSessionCapability(p.id, capabilityData)
 }
 
 // receiveSessionCapability receives and validates the server's SESSION_CAPABILITY response.
@@ -558,6 +676,26 @@ func (p *Pool) receiveSessionCapability(ctx context.Context) error {
 	return nil
 }
 
+// sendConnectRunspacePool sends the CONNECT_RUNSPACEPOOL message (blocking).
+func (p *Pool) sendConnectRunspacePool(ctx context.Context) error {
+	p.mu.RLock()
+	minRunspaces := p.minRunspaces
+	maxRunspaces := p.maxRunspaces
+	p.mu.RUnlock()
+
+	// Reuse the same payload structure as INIT_RUNSPACEPOOL
+	// MS-PSRP 3.1.5.3.3 says we should validate RunspacePoolID.
+	// We send the same Min/Max params.
+	xmlData := p.createRunspacePoolInitXML(minRunspaces, maxRunspaces)
+
+	// Create CONNECT_RUNSPACEPOOL message using the builder from messages package
+	// Note: We need to pass the payload as []byte
+	msg := messages.NewConnectRunspacePool(p.id, []byte(xmlData))
+
+	// We rely on sendMessage to handle ID generation
+	return p.sendMessage(ctx, msg)
+}
+
 // sendInitRunspacePool sends the INIT_RUNSPACEPOOL message to the server.
 func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 	p.mu.RLock()
@@ -570,9 +708,15 @@ func (p *Pool) sendInitRunspacePool(ctx context.Context) error {
 }
 
 func (p *Pool) createInitRunspacePoolMessage(minRunspaces, maxRunspaces int) *messages.Message {
+	initData := p.createRunspacePoolInitXML(minRunspaces, maxRunspaces)
+	return messages.NewInitRunspacePool(p.id, []byte(initData))
+}
+
+func (p *Pool) createRunspacePoolInitXML(minRunspaces, maxRunspaces int) string {
 	// Build INIT_RUNSPACEPOOL XML manually to match exact PowerShell format
 	// Per MS-PSRP, this uses <MS> (MemberSet) format, not <Props>
-	initData := fmt.Sprintf(`<Obj RefId="0"><MS>`+
+	// ApplicationArguments is required per server error "Remoting data is missing ApplicationArguments property"
+	return fmt.Sprintf(`<Obj RefId="0"><MS>`+
 		`<I32 N="MinRunspaces">%d</I32>`+
 		`<I32 N="MaxRunspaces">%d</I32>`+
 		`<Obj N="PSThreadOptions" RefId="1">`+
@@ -590,10 +734,10 @@ func (p *Pool) createInitRunspacePoolMessage(minRunspaces, maxRunspaces int) *me
 		`<B N="_useRunspaceHost">true</B>`+
 		`</MS></Obj>`+
 		`<Nil N="ApplicationArguments"/>`+
-		`</MS></Obj>`,
-		minRunspaces, maxRunspaces)
-
-	return messages.NewInitRunspacePool(p.id, []byte(initData))
+		`<Obj N="ApplicationPrivateData" RefId="4"><MS>`+
+		`<B N="PSVersionTable">true</B>`+
+		`</MS></Obj>`+
+		`</MS></Obj>`, minRunspaces, maxRunspaces)
 }
 
 // GetCommandMetadata queries the server for information about available commands.
@@ -865,6 +1009,7 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			return
 		}
 
+		fmt.Fprintf(os.Stderr, "DEBUG: [dispatch] Received msg type=0x%08X pipeline=%s\n", uint32(msg.Type), msg.PipelineID)
 		p.logf("[dispatch] received message type=0x%08X pipeline=%s", uint32(msg.Type), msg.PipelineID)
 
 		// Dispatch based on PipelineID
@@ -1060,6 +1205,48 @@ func (p *Pool) GetHandshakeFragments() ([]byte, error) {
 		result = append(result, f.Encode()...)
 	}
 	for _, f := range initFrags {
+		result = append(result, f.Encode()...)
+	}
+
+	return result, nil
+}
+
+// GetConnectHandshakeFragments generates the PSRP fragments for connecting to
+// an existing disconnected RunspacePool (SESSION_CAPABILITY + CONNECT_RUNSPACEPOOL).
+// This is used for the connectXml in WSManConnectShellEx when a NEW client
+// connects to a session that was disconnected by a different client.
+func (p *Pool) GetConnectHandshakeFragments() ([]byte, error) {
+	// 1. Session Capability
+	capMsg := p.createSessionCapabilityMessage()
+	capFrags, err := p.prepareMessage(capMsg)
+	if err != nil {
+		return nil, fmt.Errorf("prepare capability fragments: %w", err)
+	}
+
+	// 2. Connect RunspacePool - EMPTY per pypsrp implementation
+	// Unlike INIT_RUNSPACEPOOL, CONNECT_RUNSPACEPOOL uses an empty string payload <S></S>.
+	// Reference: pypsrp/messages.py message_type == CONNECT_RUNSPACEPOOL check.
+	connectParams := []byte(`<S></S>`)
+	connectMsg := messages.NewConnectRunspacePool(p.id, connectParams)
+	connectFrags, err := p.prepareMessage(connectMsg)
+	if err != nil {
+		return nil, fmt.Errorf("prepare connect fragments: %w", err)
+	}
+
+	// Flatten all fragments into a single byte slice
+	var totalLen int
+	for _, f := range capFrags {
+		totalLen += len(f.Encode())
+	}
+	for _, f := range connectFrags {
+		totalLen += len(f.Encode())
+	}
+
+	result := make([]byte, 0, totalLen)
+	for _, f := range capFrags {
+		result = append(result, f.Encode()...)
+	}
+	for _, f := range connectFrags {
 		result = append(result, f.Encode()...)
 	}
 

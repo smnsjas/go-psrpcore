@@ -318,6 +318,19 @@ func NewInitRunspacePool(runspaceID uuid.UUID, data []byte) *Message {
 	}
 }
 
+// NewConnectRunspacePool creates a CONNECT_RUNSPACEPOOL message.
+// data typically contains the same Min/Max runspaces info as Init,
+// but for reconnection it might be empty or specific to the session being reconnected.
+func NewConnectRunspacePool(runspaceID uuid.UUID, data []byte) *Message {
+	return &Message{
+		Destination: DestinationServer,
+		Type:        MessageTypeConnectRunspacePool,
+		RunspaceID:  runspaceID,
+		PipelineID:  uuid.Nil,
+		Data:        data,
+	}
+}
+
 // RunspacePoolState represents the state of a runspace pool.
 type RunspacePoolState int32
 

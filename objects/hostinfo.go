@@ -1,4 +1,4 @@
-package serialization
+package objects
 
 // HostInfo represents the host information.
 // It matches the structure expected by PowerShell deserializer (private fields).

@@ -95,6 +95,8 @@ const (
 	MessageTypeConnectRunspacePool MessageType = 0x00010008
 	// Runspace pool state change - MS-PSRP 2.2.2.2
 	MessageTypeRunspacePoolState MessageType = 0x00021005
+	// Disconnect runspace pool (Hypothetical/Extension)
+	MessageTypeDisconnectRunspacePool MessageType = 0x0001000C
 )
 
 // Runspace pool management message types.

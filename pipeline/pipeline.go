@@ -153,6 +153,35 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 	return p
 }
 
+// NewWithID creates a new Pipeline with a specific ID attached to the given transport.
+// This is used for recovering disconnected pipelines.
+func NewWithID(transport Transport, runspaceID, pipelineID uuid.UUID) *Pipeline {
+	// Create with empty command since we are just recovering output
+	ps := objects.NewPowerShell()
+	ps.NoInput = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	p := &Pipeline{
+		id:             pipelineID,
+		runspaceID:     runspaceID,
+		state:          StateRunning, // Assume running or ready to receive
+		transport:      transport,
+		powerShell:     ps,
+		outputCh:       make(chan *messages.Message, 100),
+		errorCh:        make(chan *messages.Message, 100),
+		warningCh:      make(chan *messages.Message, 100),
+		verboseCh:      make(chan *messages.Message, 100),
+		debugCh:        make(chan *messages.Message, 100),
+		progressCh:     make(chan *messages.Message, 100),
+		informationCh:  make(chan *messages.Message, 100),
+		doneCh:         make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
+		channelTimeout: DefaultChannelTimeout,
+	}
+	return p
+}
+
 // NewBuilder creates a new Pipeline with an empty command list.
 // Use AddCommand/AddParameter to build the pipeline.
 func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {

@@ -146,7 +146,6 @@ func (s State) String() string {
 		return "Closed"
 	case StateDisconnected:
 		return "Disconnected"
-		return "Closed"
 	case StateBroken:
 		return "Broken"
 	default:
@@ -211,11 +210,13 @@ type Pool struct {
 	dispatchLoopStarted bool  // Track if dispatch loop has been started
 }
 
-// New creates a new RunspacePool with the given transport and ID.
+// NewWithContext creates a new RunspacePool with the given context, transport, and ID.
+// The context is used for cancellation propagation - when the parent context is cancelled,
+// the pool's internal operations will also be cancelled.
 // The pool starts in StateBeforeOpen.
-func New(transport io.ReadWriter, id uuid.UUID) *Pool {
+func NewWithContext(ctx context.Context, transport io.ReadWriter, id uuid.UUID) *Pool {
 	defaultHost := host.NewNullHost()
-	ctx, cancel := context.WithCancel(context.Background())
+	poolCtx, cancel := context.WithCancel(ctx)
 	return &Pool{
 		id:                  id,
 		state:               StateBeforeOpen,
@@ -232,9 +233,16 @@ func New(transport io.ReadWriter, id uuid.UUID) *Pool {
 		outgoingCh:          make(chan *messages.Message, 100),
 		readyCh:             make(chan struct{}),
 		doneCh:              make(chan struct{}),
-		ctx:                 ctx,
+		ctx:                 poolCtx,
 		cancel:              cancel,
 	}
+}
+
+// New creates a new RunspacePool with the given transport and ID.
+// The pool starts in StateBeforeOpen.
+// For better lifecycle control, consider using NewWithContext instead.
+func New(transport io.ReadWriter, id uuid.UUID) *Pool {
+	return NewWithContext(context.Background(), transport, id)
 }
 
 // SetHost sets the host implementation for handling host callbacks.
@@ -1234,7 +1242,10 @@ func (p *Pool) sendMessage(ctx context.Context, msg *messages.Message) error {
 
 	// Send each fragment
 	for _, frag := range frags {
-		fragData := frag.Encode()
+		fragData, err := frag.Encode()
+		if err != nil {
+			return fmt.Errorf("encode fragment: %w", err)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -1303,20 +1314,20 @@ func (p *Pool) GetHandshakeFragments() ([]byte, error) {
 	}
 
 	// Flatten all fragments into a single byte slice by encoding each
-	var totalLen int
+	var result []byte
 	for _, f := range capFrags {
-		totalLen += len(f.Encode())
+		encoded, err := f.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encode capability fragment: %w", err)
+		}
+		result = append(result, encoded...)
 	}
 	for _, f := range initFrags {
-		totalLen += len(f.Encode())
-	}
-
-	result := make([]byte, 0, totalLen)
-	for _, f := range capFrags {
-		result = append(result, f.Encode()...)
-	}
-	for _, f := range initFrags {
-		result = append(result, f.Encode()...)
+		encoded, err := f.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encode init fragment: %w", err)
+		}
+		result = append(result, encoded...)
 	}
 
 	return result, nil
@@ -1345,20 +1356,20 @@ func (p *Pool) GetConnectHandshakeFragments() ([]byte, error) {
 	}
 
 	// Flatten all fragments into a single byte slice
-	var totalLen int
+	var result []byte
 	for _, f := range capFrags {
-		totalLen += len(f.Encode())
+		encoded, err := f.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encode capability fragment: %w", err)
+		}
+		result = append(result, encoded...)
 	}
 	for _, f := range connectFrags {
-		totalLen += len(f.Encode())
-	}
-
-	result := make([]byte, 0, totalLen)
-	for _, f := range capFrags {
-		result = append(result, f.Encode()...)
-	}
-	for _, f := range connectFrags {
-		result = append(result, f.Encode()...)
+		encoded, err := f.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encode connect fragment: %w", err)
+		}
+		result = append(result, encoded...)
 	}
 
 	return result, nil

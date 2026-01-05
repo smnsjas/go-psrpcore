@@ -145,6 +145,30 @@ We maintain detailed design documentation and performance analysis in the `docs/
 
 See [docs/README.md](docs/README.md) for the full index.
 
+## Logging
+
+ This library supports structured logging via Go's `log/slog` package (Go 1.21+).
+
+### Environment Variables
+
+ You can enable logging globally by setting the `PSRP_LOG_LEVEL` environment variable:
+
+ ```bash
+ export PSRP_LOG_LEVEL=info  # options: debug, info, warn, error
+ ```
+
+### Custom Logger
+
+ You can also inject a custom `slog.Logger` into the `RunspacePool`:
+
+ ```go
+ logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+     Level: slog.LevelDebug,
+ }))
+ 
+ pool.SetSlogLogger(logger)
+ ```
+
 ## Testing
 
 This library uses a **Sans-IO** design, making it easy to test without a live PowerShell server.

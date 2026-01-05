@@ -121,14 +121,19 @@ type Pipeline struct {
 	skipInvokeSend bool
 }
 
-// New creates a new Pipeline attached to the given transport.
-// command can be a raw script, which will be wrapped in a PowerShell object.
-func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
+// NewWithContext creates a new Pipeline with the given context.
+// The context is used for cancellation propagation.
+func NewWithContext(
+	ctx context.Context,
+	transport Transport,
+	runspaceID uuid.UUID,
+	command string,
+) *Pipeline {
 	ps := objects.NewPowerShell()
 	// Default to true (script) to support arbitrary commands and pipelines
 	ps.AddCommand(command, true)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	pipelineCtx, cancel := context.WithCancel(ctx)
 	p := &Pipeline{
 		id:             uuid.New(),
 		runspaceID:     runspaceID,
@@ -143,7 +148,7 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 		progressCh:     make(chan *messages.Message, 100),
 		informationCh:  make(chan *messages.Message, 100),
 		doneCh:         make(chan struct{}),
-		ctx:            ctx,
+		ctx:            pipelineCtx,
 		cancel:         cancel,
 		channelTimeout: DefaultChannelTimeout,
 	}
@@ -151,6 +156,13 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 	// Callers that want to stream input should use NewBuilder or explicitly set NoInput=false.
 	p.powerShell.NoInput = true
 	return p
+}
+
+// New creates a new Pipeline attached to the given transport.
+// command can be a raw script, which will be wrapped in a PowerShell object.
+// For better lifecycle control, consider using NewWithContext instead.
+func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
+	return NewWithContext(context.Background(), transport, runspaceID, command)
 }
 
 // NewWithID creates a new Pipeline with a specific ID attached to the given transport.
@@ -255,7 +267,11 @@ func (p *Pipeline) GetCreatePipelineData() ([]byte, error) {
 	// Encode all fragments into a single byte slice
 	var result []byte
 	for _, f := range frags {
-		result = append(result, f.Encode()...)
+		encoded, err := f.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encode fragment: %w", err)
+		}
+		result = append(result, encoded...)
 	}
 
 	return result, nil
@@ -302,7 +318,11 @@ func (p *Pipeline) GetCreatePipelineDataWithID(startObjectID uint64) ([]byte, er
 	// Encode all fragments into a single byte slice
 	var result []byte
 	for _, f := range frags {
-		result = append(result, f.Encode()...)
+		encoded, err := f.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encode fragment: %w", err)
+		}
+		result = append(result, encoded...)
 	}
 
 	return result, nil
@@ -329,7 +349,11 @@ func (p *Pipeline) GetCloseInputData() ([]byte, error) {
 
 	var result []byte
 	for _, f := range frags {
-		result = append(result, f.Encode()...)
+		encoded, err := f.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("encode fragment: %w", err)
+		}
+		result = append(result, encoded...)
 	}
 
 	return result, nil

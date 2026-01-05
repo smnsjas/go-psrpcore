@@ -62,12 +62,24 @@ func main() {
 
 	log.Println("Starting pwsh -SSHServerMode process...")
 	// SSHServerMode is the correct flag for PowerShell 7+ PSRP over stdio
-	// User clarified pwsh is at /usr/local/bin/pwsh
-	pipes, err := startProcess("/usr/local/bin/pwsh", "-SSHServerMode", "-NoLogo", "-NoProfile")
+	// Find pwsh: use PWSH_PATH env var if set, otherwise search PATH
+	pwshPath := os.Getenv("PWSH_PATH")
+	if pwshPath == "" {
+		var err error
+		pwshPath, err = exec.LookPath("pwsh")
+		if err != nil {
+			log.Fatalf("PowerShell (pwsh) not found in PATH. Set PWSH_PATH environment variable: %v", err)
+		}
+	}
+	pipes, err := startProcess(pwshPath, "-SSHServerMode", "-NoLogo", "-NoProfile")
 	if err != nil {
 		log.Fatalf("Failed to start pwsh: %v", err)
 	}
-	defer pipes.Close()
+	defer func() {
+		if err := pipes.Close(); err != nil {
+			log.Printf("Warning: failed to close pipes: %v", err)
+		}
+	}()
 
 	// Create OutOfProcess transport
 	// The transport wraps the stdin/stdout and handles the XML framing protocol

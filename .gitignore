@@ -5,6 +5,11 @@
 *.so
 *.dylib
 
+# Compiled Go binaries (no extension on macOS/Linux)
+psrp-client
+psrp-client-*
+psrp-test
+
 # Test binary, built with `go test -c`
 *.test
 

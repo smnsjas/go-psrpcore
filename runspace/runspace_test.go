@@ -1155,3 +1155,70 @@ func TestRunspacePool_ContextLifecycle(t *testing.T) {
 		t.Error("Pool context was not cancelled after Close()")
 	}
 }
+
+func TestAdoptPipeline(t *testing.T) {
+	pool := New(&blockingMockReadWriter{}, uuid.New())
+	pool.state = StateOpened
+
+	// Create a pipeline with a known ID
+	pipelineID := uuid.New()
+	pl := pipeline.NewWithID(pool, pool.id, pipelineID)
+
+	// Adopt the pipeline
+	if err := pool.AdoptPipeline(pl); err != nil {
+		t.Fatalf("AdoptPipeline failed: %v", err)
+	}
+
+	// Verify it's in the map
+	if _, ok := pool.pipelines.Load(pipelineID); !ok {
+		t.Error("Adopted pipeline not found in pool")
+	}
+
+	// Try to adopt the same pipeline again
+	if err := pool.AdoptPipeline(pl); err == nil {
+		t.Error("expected error when adopting duplicate pipeline")
+	}
+
+	// Test invalid state
+	pool.state = StateBeforeOpen
+	pl2 := pipeline.NewWithID(pool, pool.id, uuid.New())
+	if err := pool.AdoptPipeline(pl2); err != ErrNotOpen {
+		t.Errorf("expected ErrNotOpen, got %v", err)
+	}
+}
+
+func TestCreatePipelineBuilder(t *testing.T) {
+	pool := New(&blockingMockReadWriter{}, uuid.New())
+	pool.state = StateOpened
+
+	pl, err := pool.CreatePipelineBuilder()
+	if err != nil {
+		t.Fatalf("CreatePipelineBuilder failed: %v", err)
+	}
+
+	if pl == nil {
+		t.Fatal("expected non-nil pipeline")
+	}
+
+	// Verify it's in the map
+	if _, ok := pool.pipelines.Load(pl.ID()); !ok {
+		t.Error("Pipeline not found in pool")
+	}
+
+	// Test invalid state
+	pool.state = StateBeforeOpen
+	_, err = pool.CreatePipelineBuilder()
+	if err != ErrNotOpen {
+		t.Errorf("expected ErrNotOpen, got %v", err)
+	}
+}
+
+func TestEnableDebugLogging(t *testing.T) {
+	pool := New(&blockingMockReadWriter{}, uuid.New())
+
+	// Should not panic
+	pool.EnableDebugLogging()
+
+	// Verify logging works by calling logf
+	pool.logf("test message")
+}

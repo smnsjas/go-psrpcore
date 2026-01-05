@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,16 +15,30 @@ import (
 
 // mockTransport is a mock implementation of Transport for testing.
 type mockTransport struct {
+	mu   sync.Mutex
 	sent []*messages.Message
 	err  error
 }
 
 func (m *mockTransport) SendMessage(_ context.Context, msg *messages.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.err != nil {
 		return m.err
 	}
 	m.sent = append(m.sent, msg)
 	return nil
+}
+
+func (m *mockTransport) GetSent() []*messages.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.sent) == 0 {
+		return nil
+	}
+	sent := make([]*messages.Message, len(m.sent))
+	copy(sent, m.sent)
+	return sent
 }
 
 func (m *mockTransport) Host() host.Host {
@@ -86,10 +101,11 @@ func TestPipeline_Invoke(t *testing.T) {
 
 			if !tt.expectError {
 				// Verify CREATE_PIPELINE message was sent
-				if len(transport.sent) != 1 {
-					t.Fatalf("expected 1 message sent, got %d", len(transport.sent))
+				sent := transport.GetSent()
+				if len(sent) != 1 {
+					t.Fatalf("expected 1 message sent, got %d", len(sent))
 				}
-				msg := transport.sent[0]
+				msg := sent[0]
 				if msg.Type != messages.MessageTypeCreatePipeline {
 					t.Errorf("expected CreatePipeline message, got %v", msg.Type)
 				}
@@ -186,10 +202,11 @@ func TestPipeline_Stop(t *testing.T) {
 	}
 
 	// Verify SIGNAL message sent
-	if len(transport.sent) != 2 { // Create + Signal
-		t.Fatalf("expected 2 messages, got %d", len(transport.sent))
+	sent := transport.GetSent()
+	if len(sent) != 2 { // Create + Signal
+		t.Fatalf("expected 2 messages, got %d", len(sent))
 	}
-	msg := transport.sent[1]
+	msg := sent[1]
 	if msg.Type != messages.MessageTypeSignal {
 		t.Errorf("expected Signal message, got %v", msg.Type)
 	}
@@ -210,10 +227,11 @@ func TestPipeline_Input(t *testing.T) {
 	}
 
 	// Verify PIPELINE_INPUT message
-	if len(transport.sent) < 2 {
+	sent := transport.GetSent()
+	if len(sent) < 2 {
 		t.Fatalf("expected input message to be sent")
 	}
-	msg := transport.sent[1]
+	msg := sent[1]
 	if msg.Type != messages.MessageTypePipelineInput {
 		t.Errorf("expected PipelineInput message, got %v", msg.Type)
 	}
@@ -225,10 +243,11 @@ func TestPipeline_Input(t *testing.T) {
 	}
 
 	// Verify END_OF_PIPELINE_INPUT message
-	if len(transport.sent) < 3 {
+	sent = transport.GetSent()
+	if len(sent) < 3 {
 		t.Fatalf("expected end of input message to be sent")
 	}
-	msgEnd := transport.sent[2]
+	msgEnd := sent[2]
 	if msgEnd.Type != messages.MessageTypeEndOfPipelineInput {
 		t.Errorf("expected EndOfPipelineInput message, got %v", msgEnd.Type)
 	}
@@ -756,5 +775,96 @@ func TestPipeline_Invoke_AlreadyRunning(t *testing.T) {
 	}
 	if !errors.Is(err, ErrInvalidState) {
 		t.Errorf("expected ErrInvalidState, got: %v", err)
+	}
+}
+
+func TestPipeline_NewWithID(t *testing.T) {
+	transport := &mockTransport{}
+	runspaceID := uuid.New()
+	pipelineID := uuid.New()
+
+	p := NewWithID(transport, runspaceID, pipelineID)
+
+	if p.ID() != pipelineID {
+		t.Errorf("expected pipeline ID %s, got %s", pipelineID, p.ID())
+	}
+	if p.State() != StateRunning {
+		t.Errorf("expected StateRunning, got %v", p.State())
+	}
+}
+
+func TestPipeline_HandleMessage_Streams(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
+
+	checkStream := func(msgType messages.MessageType, data string, ch <-chan *messages.Message, name string) {
+		msg := &messages.Message{
+			Type:       msgType,
+			PipelineID: p.ID(),
+			Data:       []byte(data),
+		}
+		if err := p.HandleMessage(msg); err != nil {
+			t.Errorf("%s HandleMessage failed: %v", name, err)
+			return
+		}
+		select {
+		case received := <-ch:
+			if string(received.Data) != data {
+				t.Errorf("%s mismatch: got %q, want %q", name, received.Data, data)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Errorf("%s timeout", name)
+		}
+	}
+
+	checkStream(messages.MessageTypeErrorRecord, "error", p.Error(), "Error")
+	checkStream(messages.MessageTypeWarningRecord, "warning", p.Warning(), "Warning")
+	checkStream(messages.MessageTypeVerboseRecord, "verbose", p.Verbose(), "Verbose")
+	checkStream(messages.MessageTypeDebugRecord, "debug", p.Debug(), "Debug")
+	checkStream(messages.MessageTypeProgressRecord, "progress", p.Progress(), "Progress")
+	checkStream(messages.MessageTypeInformationRecord, "info", p.Information(), "Information")
+}
+
+func TestPipeline_HandleMessage_HostCall(t *testing.T) {
+	transport := &mockTransport{}
+	p := New(transport, uuid.New(), "test")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
+
+	call := &host.RemoteHostCall{
+		CallID:           123,
+		MethodID:         host.MethodIDWriteLine2,
+		MethodParameters: []interface{}{"test host call"},
+	}
+
+	callData, err := host.EncodeRemoteHostCall(call)
+	if err != nil {
+		t.Fatalf("EncodeRemoteHostCall failed: %v", err)
+	}
+
+	msg := &messages.Message{
+		Type:       messages.MessageTypePipelineHostCall,
+		PipelineID: p.ID(),
+		Data:       callData,
+	}
+
+	if err := p.HandleMessage(msg); err != nil {
+		t.Fatalf("HandleMessage failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	sent := transport.GetSent()
+	if len(sent) < 2 {
+		t.Errorf("expected host response message, got %d messages", len(sent))
+	} else {
+		lastMsg := sent[len(sent)-1]
+		if lastMsg.Type != messages.MessageTypePipelineHostResponse {
+			t.Errorf("expected PipelineHostResponse, got %v", lastMsg.Type)
+		}
 	}
 }

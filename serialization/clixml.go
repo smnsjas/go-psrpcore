@@ -182,6 +182,16 @@ var keySlicePool = sync.Pool{
 	},
 }
 
+// pool for PSObject to reduce allocations during deserialization
+var psObjectPool = sync.Pool{
+	New: func() interface{} {
+		return &PSObject{
+			Properties: make(map[string]interface{}, 8),
+			TypeNames:  make([]string, 0, 4),
+		}
+	},
+}
+
 // NewSerializer creates a new Serializer.
 // It retrieves a serializer from the pool. Release it with Close().
 func NewSerializer() *Serializer {
@@ -437,11 +447,28 @@ func (s *Serializer) serializeStringFast(val string, name string) error {
 	} else {
 		s.buf.WriteString("<S>")
 	}
-	if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
-		return fmt.Errorf("escape string: %w", err)
+	// Fast path: if string has no special XML chars, write directly (no allocation)
+	if !needsXMLEscape(val) {
+		s.buf.WriteString(val)
+	} else {
+		// Slow path: escape special characters (allocates []byte)
+		if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
+			return fmt.Errorf("escape string: %w", err)
+		}
 	}
 	s.buf.WriteString("</S>")
 	return nil
+}
+
+// needsXMLEscape returns true if the string contains characters that need XML escaping.
+func needsXMLEscape(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<', '>', '&', '\'', '"':
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Serializer) serializeInt32Fast(val int32, name string) error {
@@ -606,7 +633,12 @@ func (s *Serializer) serializePSRPEnumFast(val *PSRPEnum, name string) error {
 		s.buf.WriteString(`">`)
 	}
 
-	tnKey := val.Type + "|System.Enum|System.ValueType|System.Object"
+	// Build tnKey using buffer to avoid heap allocation from string concatenation
+	var tnKeyBuilder strings.Builder
+	tnKeyBuilder.Grow(len(val.Type) + 46) // |System.Enum|System.ValueType|System.Object = 46 chars
+	tnKeyBuilder.WriteString(val.Type)
+	tnKeyBuilder.WriteString("|System.Enum|System.ValueType|System.Object")
+	tnKey := tnKeyBuilder.String()
 
 	if tnRefID, exists := s.tnRefs[tnKey]; exists {
 		s.buf.WriteString(`<TNRef RefId="`)
@@ -1389,7 +1421,8 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 }
 
 func (d *Deserializer) deserializeList() ([]interface{}, error) {
-	var result []interface{}
+	// Pre-allocate with typical list size to reduce reallocations
+	result := make([]interface{}, 0, 8)
 
 	for {
 		tok, err := d.dec.Token()
@@ -1414,7 +1447,8 @@ func (d *Deserializer) deserializeList() ([]interface{}, error) {
 }
 
 func (d *Deserializer) deserializeDict() (map[string]interface{}, error) {
-	result := make(map[string]interface{})
+	// Pre-allocate with typical dict size
+	result := make(map[string]interface{}, 8)
 
 	for {
 		tok, err := d.dec.Token()
@@ -1496,9 +1530,19 @@ func (d *Deserializer) deserializeDictEntry() (string, interface{}, error) {
 //
 //nolint:gocyclo // PSObject property type dispatch - inherent complexity
 func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, error) {
-	obj := &PSObject{
-		Properties: make(map[string]interface{}),
+	// Get PSObject from pool to reduce allocations
+	obj := psObjectPool.Get().(*PSObject)
+	// Reset fields for reuse
+	obj.ToString = ""
+	obj.Value = nil
+	obj.OrderedMemberKeys = nil
+	obj.Members = nil
+	// Clear Properties map (reuse underlying storage)
+	for k := range obj.Properties {
+		delete(obj.Properties, k)
 	}
+	// Clear TypeNames slice (keep capacity)
+	obj.TypeNames = obj.TypeNames[:0]
 
 	// Check for RefId attribute
 	var refID int

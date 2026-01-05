@@ -142,6 +142,39 @@ func (p *Pipeline) logf(format string, v ...interface{}) {
 	}
 }
 
+// logInfo logs an informational message (normal operations).
+func (p *Pipeline) logInfo(format string, v ...interface{}) {
+	p.mu.RLock()
+	logger := p.slogLogger
+	p.mu.RUnlock()
+
+	if logger != nil {
+		logger.Info(fmt.Sprintf(format, v...))
+	}
+}
+
+// logWarn logs a warning message (potential issues, recoverable).
+func (p *Pipeline) logWarn(format string, v ...interface{}) {
+	p.mu.RLock()
+	logger := p.slogLogger
+	p.mu.RUnlock()
+
+	if logger != nil {
+		logger.Warn(fmt.Sprintf(format, v...))
+	}
+}
+
+// logError logs an error message (failures that affect function).
+func (p *Pipeline) logError(format string, v ...interface{}) {
+	p.mu.RLock()
+	logger := p.slogLogger
+	p.mu.RUnlock()
+
+	if logger != nil {
+		logger.Error(fmt.Sprintf(format, v...))
+	}
+}
+
 // NewWithContext creates a new Pipeline with the given context.
 // The context is used for cancellation propagation.
 func NewWithContext(
@@ -436,7 +469,7 @@ func (p *Pipeline) Cancel() {
 
 // Invoke starts the pipeline execution.
 func (p *Pipeline) Invoke(ctx context.Context) error {
-	p.logf("Invoke called")
+	p.logInfo("Invoke called")
 	p.mu.Lock()
 	if p.state != StateNotStarted {
 		p.mu.Unlock()
@@ -474,7 +507,7 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 // Stop sends a signal to stop the running pipeline.
 // It sends a SIGNAL message (MS-PSRP 2.2.2.10) and transitions to StateStopping.
 func (p *Pipeline) Stop(ctx context.Context) error {
-	p.logf("Stop called")
+	p.logInfo("Stop called")
 	p.mu.Lock()
 	if p.state != StateRunning {
 		p.mu.Unlock()

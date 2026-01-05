@@ -51,6 +51,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -185,7 +186,8 @@ type Pool struct {
 	hostCallbackHandler *host.CallbackHandler
 
 	// Debug logging
-	logger Logger
+	logger     Logger
+	slogLogger *slog.Logger
 
 	// Metadata
 	metadataCh chan *messages.Message
@@ -263,6 +265,8 @@ func (p *Pool) SetHost(h host.Host) error {
 // SetLogger sets the logger for debug logging.
 // This is optional - if not set, no logging is performed.
 // Must be called before Open().
+//
+// Deprecated: Use SetSlogLogger instead.
 func (p *Pool) SetLogger(logger Logger) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -274,11 +278,30 @@ func (p *Pool) SetLogger(logger Logger) error {
 	return nil
 }
 
+// SetSlogLogger sets the structured logger for debug logging.
+// This uses the log/slog package for structured, context-aware logging.
+// Must be called before Open().
+func (p *Pool) SetSlogLogger(logger *slog.Logger) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state != StateBeforeOpen {
+		return ErrInvalidState
+	}
+	p.slogLogger = logger.With("runspace_id", p.id)
+	return nil
+}
+
 // EnableDebugLogging enables debug logging to stderr using the standard log package.
 func (p *Pool) EnableDebugLogging() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// Configure legacy logger
 	p.logger = log.New(os.Stderr, "[psrp] ", log.LstdFlags)
+	// Also configure slog to write to stderr in text format for backward compatibility
+	p.slogLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})).With("runspace_id", p.id)
 }
 
 // Host returns the host implementation associated with the runspace pool.
@@ -1601,8 +1624,17 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 func (p *Pool) logf(format string, v ...interface{}) {
 	p.mu.RLock()
 	logger := p.logger
+	slogLogger := p.slogLogger
 	p.mu.RUnlock()
 
+	// Prefer slog if available
+	if slogLogger != nil {
+		msg := fmt.Sprintf(format, v...)
+		slogLogger.Debug(msg)
+		return
+	}
+
+	// Fallback to legacy logger
 	if logger != nil {
 		logger.Printf(format, v...)
 	}

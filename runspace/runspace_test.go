@@ -55,7 +55,10 @@ func (m *mockTransport) queueMessage(msg *messages.Message) error {
 	}
 
 	for _, frag := range frags {
-		fragData := frag.Encode()
+		fragData, err := frag.Encode()
+		if err != nil {
+			return err
+		}
 		m.readBuf.Write(fragData)
 	}
 
@@ -487,7 +490,11 @@ func TestDispatchLoopTransportError(t *testing.T) {
 			return err
 		}
 		for _, frag := range frags {
-			if _, err := serverWriter.Write(frag.Encode()); err != nil {
+			fragData, err := frag.Encode()
+			if err != nil {
+				return err
+			}
+			if _, err := serverWriter.Write(fragData); err != nil {
 				return err
 			}
 		}
@@ -539,7 +546,8 @@ func TestDispatchLoopTransportError(t *testing.T) {
 	}()
 
 	// Open pool
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if err := pool.Open(ctx); err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -1058,7 +1066,9 @@ func TestGetCommandMetadata(t *testing.T) {
 		pool.metadataCh <- replyMsg
 	}()
 
-	results, err := pool.GetCommandMetadata(context.Background(), []string{"Get-Process"})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	results, err := pool.GetCommandMetadata(ctx, []string{"Get-Process"})
 	if err != nil {
 		t.Fatalf("GetCommandMetadata failed: %v", err)
 	}
@@ -1134,7 +1144,9 @@ func TestRunspacePool_ContextLifecycle(t *testing.T) {
 
 	go pool.dispatchLoop(pool.ctx)
 
-	_ = pool.Close(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = pool.Close(ctx)
 
 	select {
 	case <-pool.ctx.Done():

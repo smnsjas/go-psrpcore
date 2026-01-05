@@ -213,7 +213,10 @@ func BenchmarkFragmentEncode(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = frag.Encode()
+		_, err := frag.Encode()
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -225,7 +228,10 @@ func BenchmarkFragmentDecode(b *testing.B) {
 		End:        true,
 		Data:       make([]byte, 1024),
 	}
-	encoded := frag.Encode()
+	encoded, err := frag.Encode()
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -250,7 +256,10 @@ func BenchmarkFragmentEncodeLarge(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = frag.Encode()
+		_, err := frag.Encode()
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -454,7 +463,7 @@ func BenchmarkRoundTripSmall(b *testing.B) {
 
 		// Encode fragments
 		for _, frag := range frags {
-			_ = frag.Encode()
+			_, _ = frag.Encode()
 		}
 
 		// Decode fragments
@@ -515,7 +524,7 @@ func BenchmarkRoundTripMedium(b *testing.B) {
 		}
 
 		for _, frag := range frags {
-			_ = frag.Encode()
+			_, _ = frag.Encode()
 		}
 
 		assembler := fragments.NewAssembler()

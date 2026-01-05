@@ -64,7 +64,8 @@ func TestPipeline_Invoke(t *testing.T) {
 				t.Errorf("expected initial state NotStarted, got %v", p.State())
 			}
 
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
 			err := p.Invoke(ctx)
 
 			if tt.expectError {
@@ -102,7 +103,9 @@ func TestPipeline_HandleMessage_Output(t *testing.T) {
 	p := New(transport, uuid.New(), "test")
 
 	// Transition to Running
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Simulate output message
 	outMsg := &messages.Message{
@@ -130,7 +133,9 @@ func TestPipeline_HandleMessage_Output(t *testing.T) {
 func TestPipeline_Completion(t *testing.T) {
 	transport := &mockTransport{}
 	p := New(transport, uuid.New(), "test")
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Serialize state value 4 (Completed) as CLIXML
 	ser := serialization.NewSerializer()
@@ -166,10 +171,12 @@ func TestPipeline_Completion(t *testing.T) {
 func TestPipeline_Stop(t *testing.T) {
 	transport := &mockTransport{}
 	p := New(transport, uuid.New(), "test")
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Call Stop
-	err := p.Stop(context.Background())
+	err := p.Stop(ctx)
 	if err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
@@ -191,11 +198,13 @@ func TestPipeline_Stop(t *testing.T) {
 func TestPipeline_Input(t *testing.T) {
 	transport := &mockTransport{}
 	p := New(transport, uuid.New(), "test")
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Send Input
 	inputData := "some input"
-	err := p.SendInput(context.Background(), inputData)
+	err := p.SendInput(ctx, inputData)
 	if err != nil {
 		t.Fatalf("SendInput failed: %v", err)
 	}
@@ -210,7 +219,7 @@ func TestPipeline_Input(t *testing.T) {
 	}
 
 	// Close Input
-	err = p.CloseInput(context.Background())
+	err = p.CloseInput(ctx)
 	if err != nil {
 		t.Fatalf("CloseInput failed: %v", err)
 	}
@@ -285,7 +294,9 @@ func TestPipeline_StateTransitions(t *testing.T) {
 			p := New(transport, uuid.New(), "test")
 
 			// Invoke to transition to Running state
-			_ = p.Invoke(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = p.Invoke(ctx)
 
 			// Serialize the state value as CLIXML
 			ser := serialization.NewSerializer()
@@ -387,7 +398,9 @@ func TestPipeline_ChannelTimeout(t *testing.T) {
 	// Set a very short timeout for testing
 	p.SetChannelTimeout(100 * time.Millisecond)
 
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Fill the output buffer completely (100 messages)
 	for i := 0; i < 100; i++ {
@@ -432,7 +445,9 @@ func TestPipeline_ChannelBackpressure(t *testing.T) {
 	// Set a reasonable timeout
 	p.SetChannelTimeout(2 * time.Second)
 
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Fill the buffer
 	for i := 0; i < 100; i++ {
@@ -486,7 +501,9 @@ func TestPipeline_ChannelContextCancellation(t *testing.T) {
 	// Set a long timeout so we can test context cancellation
 	p.SetChannelTimeout(10 * time.Second)
 
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Fill the buffer
 	for i := 0; i < 100; i++ {
@@ -537,7 +554,9 @@ func TestPipeline_ErrorChannelTimeout(t *testing.T) {
 	// Set a very short timeout for testing
 	p.SetChannelTimeout(100 * time.Millisecond)
 
-	_ = p.Invoke(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = p.Invoke(ctx)
 
 	// Fill the error buffer completely (100 messages)
 	for i := 0; i < 100; i++ {
@@ -628,7 +647,8 @@ func TestPipeline_Fail(t *testing.T) {
 	p := New(transport, uuid.New(), "Get-Process")
 
 	// given: a running pipeline
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if err := p.Invoke(ctx); err != nil {
 		t.Fatalf("Invoke failed: %v", err)
 	}
@@ -662,7 +682,9 @@ func TestPipeline_Stop_InvalidState(t *testing.T) {
 
 	// given: a pipeline that has NOT been invoked (still NotStarted)
 	// when: trying to stop it
-	err := p.Stop(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := p.Stop(ctx)
 
 	// then: should return ErrInvalidState
 	if err == nil {
@@ -680,7 +702,9 @@ func TestPipeline_SendInput_InvalidState(t *testing.T) {
 
 	// given: a pipeline that has NOT been invoked
 	// when: trying to send input
-	err := p.SendInput(context.Background(), "test input")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := p.SendInput(ctx, "test input")
 
 	// then: should return ErrInvalidState
 	if err == nil {
@@ -698,7 +722,9 @@ func TestPipeline_CloseInput_InvalidState(t *testing.T) {
 
 	// given: a pipeline that has NOT been invoked
 	// when: trying to close input
-	err := p.CloseInput(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := p.CloseInput(ctx)
 
 	// then: should return ErrInvalidState
 	if err == nil {
@@ -715,7 +741,8 @@ func TestPipeline_Invoke_AlreadyRunning(t *testing.T) {
 	p := New(transport, uuid.New(), "Get-Process")
 
 	// given: a pipeline that has been invoked
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if err := p.Invoke(ctx); err != nil {
 		t.Fatalf("first Invoke failed: %v", err)
 	}

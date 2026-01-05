@@ -95,7 +95,12 @@ type Fragment struct {
 
 // Encode serializes the fragment to bytes.
 // All multi-byte fields use big-endian per MS-PSRP Section 2.2.4.
-func (f *Fragment) Encode() []byte {
+func (f *Fragment) Encode() ([]byte, error) {
+	if len(f.Data) > math.MaxUint32 {
+		return nil, fmt.Errorf("fragment data too large: %d bytes exceeds maximum of %d",
+			len(f.Data), math.MaxUint32)
+	}
+
 	buf := make([]byte, HeaderSize+len(f.Data))
 
 	// ObjectID (8 bytes, big-endian) - MS-PSRP 2.2.4
@@ -113,20 +118,23 @@ func (f *Fragment) Encode() []byte {
 
 	buf[16] = flags
 
-	if len(f.Data) > math.MaxUint32 {
-		// Should never happen with reasonable fragment sizes
-		panic("fragment data too large")
-	}
 	// BlobLength (4 bytes, big-endian) - MS-PSRP 2.2.4
-	binary.BigEndian.PutUint32(buf[17:21], uint32(len(f.Data))) // #nosec G115 -- length checked against MaxUint32 above
+	binary.BigEndian.PutUint32(buf[17:21], uint32(len(f.Data))) // #nosec G115 -- length checked above
 	copy(buf[21:], f.Data)
 
-	return buf
+	return buf, nil
 }
 
+// fragmentDataPool reuses byte slices for fragment data to reduce allocations.
+// The pool stores value types (slices) rather than pointers because:
+//  1. Fragment data is typically small (<4KB) where value storage overhead is minimal
+//  2. The SA6002 linter warning is suppressed in Release() - benchmarking shows
+//     this approach is efficient for our typical fragment sizes
+//  3. Fragments larger than the initial 4KB capacity allocate fresh buffers but
+//     are still returned to the pool for reuse
 var fragmentDataPool = sync.Pool{
 	New: func() interface{} {
-		return make([]byte, 0, 4096) // Common size
+		return make([]byte, 0, 4096) // Common size for PSRP fragments
 	},
 }
 
@@ -228,7 +236,12 @@ func (f *Fragmenter) Fragment(data []byte) ([]*Fragment, error) {
 		maxPayload = len(data)
 	}
 
-	var fragments []*Fragment
+	// Pre-allocate slice to reduce reallocations
+	numFragments := (len(data) + maxPayload - 1) / maxPayload
+	if numFragments == 0 {
+		numFragments = 1 // At least one fragment for empty data
+	}
+	fragments := make([]*Fragment, 0, numFragments)
 	var fragmentID uint64
 
 	for offset := 0; offset < len(data); {

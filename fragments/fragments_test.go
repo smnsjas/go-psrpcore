@@ -54,7 +54,10 @@ func TestFragmentEncodeDecode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			encoded := tt.frag.Encode()
+			encoded, err := tt.frag.Encode()
+			if err != nil {
+				t.Fatalf("Encode failed: %v", err)
+			}
 			decoded, err := Decode(encoded)
 			if err != nil {
 				t.Fatalf("Decode failed: %v", err)
@@ -81,10 +84,10 @@ func TestFragmentEncodeDecode(t *testing.T) {
 
 func TestFragmenter(t *testing.T) {
 	tests := []struct {
-		name        string
-		maxSize     int
-		data        []byte
-		wantCount   int
+		name      string
+		maxSize   int
+		data      []byte
+		wantCount int
 	}{
 		{
 			name:      "single fragment",

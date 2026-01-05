@@ -16,7 +16,8 @@ func FuzzDecode(f *testing.F) {
 		End:        true,
 		Data:       []byte("test data"),
 	}
-	f.Add(validFrag.Encode())
+	validFragBytes, _ := validFrag.Encode() // Error impossible for small data
+	f.Add(validFragBytes)
 
 	// Add edge cases
 	f.Add(make([]byte, HeaderSize))   // Minimal valid header size
@@ -92,7 +93,8 @@ func FuzzAssemblerAdd(f *testing.F) {
 		End:        true,
 		Data:       []byte("test"),
 	}
-	f.Add(validFrag.Encode())
+	validFragBytes, _ := validFrag.Encode() // Error impossible for small data
+	f.Add(validFragBytes)
 
 	f.Fuzz(func(_ *testing.T, data []byte) {
 		// Decode the fragment (may fail - that's OK)

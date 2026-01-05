@@ -37,17 +37,22 @@ type Adapter struct {
 	onSignalAck  func(psGuid uuid.UUID)
 }
 
-// NewAdapter creates an adapter for a specific runspace.
-// The adapter handles the OutOfProcess framing and provides raw fragment I/O.
-func NewAdapter(transport *Transport, runspaceGUID uuid.UUID) *Adapter {
-	ctx, cancel := context.WithCancel(context.Background())
+// NewAdapterWithContext creates an adapter with the given context for cancellation.
+// The context is used for cancellation propagation - when the parent context is cancelled,
+// the adapter's internal operations will also be cancelled.
+func NewAdapterWithContext(
+	ctx context.Context,
+	transport *Transport,
+	runspaceGUID uuid.UUID,
+) *Adapter {
+	adapterCtx, cancel := context.WithCancel(ctx)
 
 	a := &Adapter{
 		transport:    transport,
 		runspaceGUID: runspaceGUID,
 		pending:      make([][]byte, 0, 16),
 		notifyCh:     make(chan struct{}, 1),
-		ctx:          ctx,
+		ctx:          adapterCtx,
 		cancel:       cancel,
 	}
 
@@ -55,6 +60,13 @@ func NewAdapter(transport *Transport, runspaceGUID uuid.UUID) *Adapter {
 	go a.readLoop()
 
 	return a
+}
+
+// NewAdapter creates an adapter for a specific runspace.
+// The adapter handles the OutOfProcess framing and provides raw fragment I/O.
+// For better lifecycle control, consider using NewAdapterWithContext instead.
+func NewAdapter(transport *Transport, runspaceGUID uuid.UUID) *Adapter {
+	return NewAdapterWithContext(context.Background(), transport, runspaceGUID)
 }
 
 // SetCommandAckHandler sets a callback for CommandAck packets.

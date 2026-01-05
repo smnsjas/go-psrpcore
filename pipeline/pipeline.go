@@ -436,6 +436,7 @@ func (p *Pipeline) Cancel() {
 
 // Invoke starts the pipeline execution.
 func (p *Pipeline) Invoke(ctx context.Context) error {
+	p.logf("Invoke called")
 	p.mu.Lock()
 	if p.state != StateNotStarted {
 		p.mu.Unlock()
@@ -473,6 +474,7 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 // Stop sends a signal to stop the running pipeline.
 // It sends a SIGNAL message (MS-PSRP 2.2.2.10) and transitions to StateStopping.
 func (p *Pipeline) Stop(ctx context.Context) error {
+	p.logf("Stop called")
 	p.mu.Lock()
 	if p.state != StateRunning {
 		p.mu.Unlock()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -109,6 +110,8 @@ type Pipeline struct {
 	doneCh chan struct{}
 	err    error
 
+	// Debug logging
+	slogLogger *slog.Logger
 	// Lifecycle management
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -119,6 +122,24 @@ type Pipeline struct {
 	// skipInvokeSend prevents Invoke from sending the CreatePipeline message.
 	// Used when the data was already sent via another mechanism (e.g., WSMan Command Arguments).
 	skipInvokeSend bool
+}
+
+// SetSlogLogger sets the structured logger for debug logging.
+func (p *Pipeline) SetSlogLogger(logger *slog.Logger) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.slogLogger = logger.With("component", "pipeline", "pipeline_id", p.id, "runspace_id", p.runspaceID)
+}
+
+// logf logs a debug message if a logger is configured.
+func (p *Pipeline) logf(format string, v ...interface{}) {
+	p.mu.RLock()
+	logger := p.slogLogger
+	p.mu.RUnlock()
+
+	if logger != nil {
+		logger.Debug(fmt.Sprintf(format, v...))
+	}
 }
 
 // NewWithContext creates a new Pipeline with the given context.

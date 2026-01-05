@@ -26,11 +26,11 @@ Your Application
 
 ## Features
 
-- 🔌 **Transport-agnostic** - Works over any bidirectional byte stream
-- 📦 **Full PSRP support** - RunspacePools, Pipelines, Host callbacks
-- 🔄 **Object serialization** - CLIXML encode/decode for PowerShell objects
-- 🔐 **SecureString support** - Encrypted credential handling
-- 📊 **Streaming output** - Progress, Debug, Verbose, Warning, Error, Information records
+- **Transport-agnostic** - Works over any bidirectional byte stream
+- **Full PSRP support** - RunspacePools, Pipelines, Host callbacks
+- **Object serialization** - CLIXML encode/decode for PowerShell objects
+- **SecureString support** - Encrypted credential handling
+- **Streaming output** - Progress, Debug, Verbose, Warning, Error, Information records
 
 ## Installation
 

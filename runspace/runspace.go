@@ -298,9 +298,23 @@ func (p *Pool) EnableDebugLogging() {
 	defer p.mu.Unlock()
 	// Configure legacy logger
 	p.logger = log.New(os.Stderr, "[psrp] ", log.LstdFlags)
+
+	// Determine log level from environment variable
+	level := slog.LevelDebug
+	if env := os.Getenv("PSRP_LOG_LEVEL"); env != "" {
+		switch strings.ToLower(env) {
+		case "info":
+			level = slog.LevelInfo
+		case "warn":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		}
+	}
+
 	// Also configure slog to write to stderr in text format for backward compatibility
 	p.slogLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: level,
 	})).With("runspace_id", p.id)
 }
 

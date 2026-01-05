@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -56,9 +58,22 @@ func startProcess(command string, args ...string) (*ProcessPipes, error) {
 }
 
 func main() {
+	// Parse flags
+	debug := flag.Bool("debug", false, "Enable debug logging")
+	flag.Parse()
+
 	// Trap Ctrl+C for clean shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+
+	// Configure logger
+	var logger *slog.Logger
+	if *debug {
+		// Use text handler for CLI readability
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
+	}
 
 	log.Println("Starting pwsh -SSHServerMode process...")
 	// SSHServerMode is the correct flag for PowerShell 7+ PSRP over stdio
@@ -94,6 +109,10 @@ func main() {
 
 	log.Println("Transport started. Initializing RunspacePool...")
 	pool := runspace.New(adapter, runspaceID)
+
+	if logger != nil {
+		pool.SetSlogLogger(logger)
+	}
 
 	// Set a minimal host to avoid nil pointer dereferences
 	_ = pool.SetHost(host.NewNullHost())

@@ -118,6 +118,8 @@ type PSObject struct {
 	OrderedMemberKeys []string               // If set, serialize members in this order
 	// ToString optionally provides a string representation
 	ToString string
+	// Value holds the inner wrapped value for PSObjects that wrap primitives (e.g. DateTime)
+	Value interface{}
 }
 
 // TypedList represents a list with specific TypeNames (for List<PSObject> etc.)
@@ -1603,8 +1605,27 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 				return list, nil
 
 			default:
-				if err := d.dec.Skip(); err != nil {
+				// Attempt to deserialize as inner value or property
+				var name string
+				for _, attr := range t.Attr {
+					if attr.Name.Local == "N" {
+						name = attr.Value
+						break
+					}
+				}
+
+				val, err := d.deserializeElement(t)
+				if err != nil {
 					return nil, err
+				}
+
+				if val != nil {
+					if name != "" {
+						obj.Properties[name] = val
+					} else {
+						// Inner wrapped value
+						obj.Value = val
+					}
 				}
 			}
 

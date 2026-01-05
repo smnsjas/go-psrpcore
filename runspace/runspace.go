@@ -112,6 +112,8 @@ const (
 	StateClosing
 	// StateClosed indicates the pool is closed.
 	StateClosed
+	// StateDisconnected indicates the pool is disconnected but technically alive on server (persisted).
+	StateDisconnected
 	// StateBroken indicates an error occurred and the pool is in a failed state.
 	StateBroken
 )
@@ -141,6 +143,9 @@ func (s State) String() string {
 	case StateClosing:
 		return "Closing"
 	case StateClosed:
+		return "Closed"
+	case StateDisconnected:
+		return "Disconnected"
 		return "Closed"
 	case StateBroken:
 		return "Broken"
@@ -439,7 +444,38 @@ func (p *Pool) Connect(ctx context.Context) error {
 		}
 
 		// 4. Wait for state to be Opened
-		return p.waitForOpened(ctx)
+		// Since dispatchLoop is running, we wait for state transition via channel
+		// We add a timeout because some transports (HvSocket) might just hang if session doesn't exist.
+		timeout := time.After(30 * time.Second)
+
+		for {
+			p.mu.RLock()
+			state := p.state
+			p.mu.RUnlock()
+
+			if state == StateOpened {
+				return nil
+			}
+			if state == StateBroken || state == StateClosed {
+				return ErrBroken
+			}
+
+			select {
+			case newState := <-p.stateCh:
+				if newState == StateOpened {
+					return nil
+				}
+				if newState == StateBroken || newState == StateClosed {
+					return ErrBroken
+				}
+			case <-timeout:
+				return fmt.Errorf("connection timed out waiting for RUNSPACEPOOL_STATE (server might not support session persistence)")
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-p.doneCh:
+				return ErrClosed
+			}
+		}
 	}
 
 	// For reconnection (SkipHandshakeSend=true), the pool is already opened on the server.
@@ -471,6 +507,37 @@ func (p *Pool) ResumeOpened() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.state = StateOpened
+}
+
+// AdoptPipeline registers an existing pipeline with the runspace pool.
+// This is used for recovering disconnected pipelines where the ID is known.
+// The pipeline must have been created with NewWithID.
+func (p *Pool) AdoptPipeline(pl *pipeline.Pipeline) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state != StateOpened && p.state != StateConnecting {
+		return ErrNotOpen
+	}
+
+	if _, exists := p.pipelines.Load(pl.ID()); exists {
+		return fmt.Errorf("pipeline %s already exists", pl.ID())
+	}
+
+	p.pipelines.Store(pl.ID(), pl)
+	return nil
+}
+
+// GetActivePipelineIDs returns the list of IDs for all currently tracked pipelines.
+func (p *Pool) GetActivePipelineIDs() []uuid.UUID {
+	var ids []uuid.UUID
+	p.pipelines.Range(func(key, value interface{}) bool {
+		if id, ok := key.(uuid.UUID); ok {
+			ids = append(ids, id)
+		}
+		return true
+	})
+	return ids
 }
 
 // ProcessConnectResponse processes the PSRP response data from WSManConnectShellEx.
@@ -532,6 +599,26 @@ func (p *Pool) ProcessConnectResponse(data []byte) error {
 		offset += fragLen
 	}
 
+	return nil
+}
+
+// Disconnect disconnects the transport without closing the runspace pool on the server.
+// This allows the session to remain alive for later reconnection.
+func (p *Pool) Disconnect() error {
+	p.mu.Lock()
+	if p.state != StateOpened {
+		p.mu.Unlock()
+		return fmt.Errorf("cannot disconnect from state %s", p.state)
+	}
+	// Transition to Disconnected
+	p.setState(StateDisconnected)
+	p.mu.Unlock()
+
+	// Close the transport explicitly. This stops the dispatch loop (read error).
+	// We do NOT send a CLOSE message.
+	if closer, ok := p.transport.(io.Closer); ok {
+		return closer.Close()
+	}
 	return nil
 }
 
@@ -886,14 +973,13 @@ func (p *Pool) SendMessage(ctx context.Context, msg *messages.Message) error {
 // CreatePipeline creates a new pipeline in the runspace pool.
 // Note: For creationXml flow, call StartDispatchLoop() after configuring the transport.
 func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
-	p.mu.Lock()
-
+	p.mu.RLock()
 	if p.state != StateOpened {
-		p.mu.Unlock()
+		p.mu.RUnlock()
 		return nil, ErrNotOpen
 	}
 
-	p.mu.Unlock()
+	p.mu.RUnlock()
 
 	pl := pipeline.New(p, p.id, command)
 	p.pipelines.Store(pl.ID(), pl)
@@ -993,13 +1079,31 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 				p.logf("[dispatch] transient error: %v", err)
 				// Check if we should continue or exit
 				p.mu.RLock()
-				closed := p.state == StateClosed || p.state == StateBroken
+				// If we are closed, broken, OR disconnected, we stop.
+				// Disconnected state implies we expect the transport to die.
+				shouldExit := p.state == StateClosed || p.state == StateBroken || p.state == StateDisconnected
 				p.mu.RUnlock()
-				if closed {
-					p.logf("[dispatch] exiting: pool closed/broken")
+				if shouldExit {
+					p.logf("[dispatch] exiting: pool state suggests stop (state=%v)", p.state)
 					return
 				}
-				// Transient error, continue polling
+				// Transient error, continue polling?
+				// If "context canceled" loop continues forever if context is not p.ctx?
+				// p.ctx drives the loop? No, p.ctx is cancelling on Close.
+				// But Disconnect() does NOT cancel p.ctx.
+				// So we rely on "state" check.
+
+				// However, "read fragment header: context canceled" likely comes from p.ctx cancellation?
+				// If p.ctx is canceled, we should return.
+				if ctx.Err() != nil {
+					return
+				}
+
+				// If error is "closed networking", preventing loop.
+				if strings.Contains(err.Error(), "closed network connection") {
+					return
+				}
+
 				continue
 			}
 
@@ -1009,7 +1113,6 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			return
 		}
 
-		fmt.Fprintf(os.Stderr, "DEBUG: [dispatch] Received msg type=0x%08X pipeline=%s\n", uint32(msg.Type), msg.PipelineID)
 		p.logf("[dispatch] received message type=0x%08X pipeline=%s", uint32(msg.Type), msg.PipelineID)
 
 		// Dispatch based on PipelineID
@@ -1069,6 +1172,11 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 				// Server reported broken state
 				p.cleanup(StateBroken, fmt.Errorf("server reported broken state"))
 				return // Exit loop
+
+			case messages.RunspacePoolStateOpened:
+				p.mu.Lock()
+				p.setState(StateOpened)
+				p.mu.Unlock()
 			}
 		}
 	}
@@ -1116,6 +1224,9 @@ func (p *Pool) cleanup(endState State, err error) {
 
 // sendMessage sends a PSRP message through the transport.
 func (p *Pool) sendMessage(ctx context.Context, msg *messages.Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	frags, err := p.prepareMessage(msg)
 	if err != nil {
 		return err

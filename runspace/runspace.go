@@ -620,7 +620,7 @@ func (p *Pool) ProcessConnectResponse(data []byte) error {
 			// Decode and process message
 			msg, err := messages.Decode(msgData)
 			if err != nil {
-				p.logf("[connect] Warning: failed to decode message: %v", err)
+				p.logWarn("[connect] Warning: failed to decode message: %v", err)
 			} else {
 				p.logf("[connect] Received message type=0x%08X", uint32(msg.Type))
 				// We can optionally process these messages, but for connect
@@ -700,10 +700,10 @@ func (p *Pool) Close(ctx context.Context) error {
 	select {
 	case <-p.doneCh:
 		// Clean exit triggered by server response
-		p.logf("[pool] Server acknowledged close (Clean)")
+		p.logInfo("[pool] Server acknowledged close (Clean)")
 	case <-time.After(100 * time.Millisecond):
 		// Timeout - force clean up locally
-		p.logf("[pool] Timeout waiting for server close")
+		p.logWarn("[pool] Timeout waiting for server close")
 		p.cleanup(StateClosed, nil)
 	case <-ctx.Done():
 		// Context cancelled - force cleanup might be needed or just exit
@@ -1110,7 +1110,7 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			if strings.Contains(errStr, "EOF") ||
 				strings.Contains(errStr, "timeout") ||
 				strings.Contains(errStr, "context canceled") {
-				p.logf("[dispatch] transient error: %v", err)
+				p.logWarn("[dispatch] transient error: %v", err)
 				// Check if we should continue or exit
 				p.mu.RLock()
 				// If we are closed, broken, OR disconnected, we stop.
@@ -1142,7 +1142,7 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			}
 
 			// Fatal transport error - transition to broken state
-			p.logf("[dispatch] fatal error: %v", err)
+			p.logError("[dispatch] fatal error: %v", err)
 			p.handleTransportError(err)
 			return
 		}
@@ -1161,7 +1161,7 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 				if err := pl.HandleMessage(msg); err != nil {
 					// If HandleMessage fails (buffer timeout or context cancelled),
 					// mark the pipeline as failed to signal the error to the consumer.
-					p.logf("[dispatch] HandleMessage failed: %v", err)
+					p.logError("[dispatch] HandleMessage failed: %v", err)
 					pl.Fail(err)
 				}
 			} else {
@@ -1627,18 +1627,45 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 func (p *Pool) logf(format string, v ...interface{}) {
 	p.mu.RLock()
 	logger := p.logger
-	slogLogger := p.slogLogger
+	slogger := p.slogLogger
 	p.mu.RUnlock()
 
-	// Prefer slog if available
-	if slogLogger != nil {
-		msg := fmt.Sprintf(format, v...)
-		slogLogger.Debug(msg)
-		return
-	}
-
-	// Fallback to legacy logger
-	if logger != nil {
+	if slogger != nil {
+		slogger.Debug(fmt.Sprintf(format, v...))
+	} else if logger != nil {
 		logger.Printf(format, v...)
+	}
+}
+
+// logInfo logs an informational message (normal operations).
+func (p *Pool) logInfo(format string, v ...interface{}) {
+	p.mu.RLock()
+	slogger := p.slogLogger
+	p.mu.RUnlock()
+
+	if slogger != nil {
+		slogger.Info(fmt.Sprintf(format, v...))
+	}
+}
+
+// logWarn logs a warning message (potential issues, recoverable).
+func (p *Pool) logWarn(format string, v ...interface{}) {
+	p.mu.RLock()
+	slogger := p.slogLogger
+	p.mu.RUnlock()
+
+	if slogger != nil {
+		slogger.Warn(fmt.Sprintf(format, v...))
+	}
+}
+
+// logError logs an error message (failures that affect function).
+func (p *Pool) logError(format string, v ...interface{}) {
+	p.mu.RLock()
+	slogger := p.slogLogger
+	p.mu.RUnlock()
+
+	if slogger != nil {
+		slogger.Error(fmt.Sprintf(format, v...))
 	}
 }

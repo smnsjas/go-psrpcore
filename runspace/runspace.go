@@ -377,6 +377,7 @@ func (p *Pool) SetMaxRunspaces(maxVal int) error {
 //  5. Receive RUNSPACEPOOL_STATE message (Opened)
 //  6. Transition to StateOpened
 func (p *Pool) Open(ctx context.Context) error {
+	p.logf("[pool] Open called (state=%s)", p.state)
 	p.mu.Lock()
 	if p.state != StateBeforeOpen {
 		p.mu.Unlock()
@@ -446,6 +447,7 @@ func (p *Pool) Open(ctx context.Context) error {
 // It assumes the session capability exchange has happened or will happen similarly to Open,
 // but sends CONNECT_RUNSPACEPOOL instead of INIT_RUNSPACEPOOL.
 func (p *Pool) Connect(ctx context.Context) error {
+	p.logf("[pool] Connect called (state=%s)", p.state)
 	p.mu.Lock()
 	if p.state != StateBeforeOpen {
 		p.mu.Unlock()
@@ -656,6 +658,7 @@ func (p *Pool) Disconnect() error {
 // Close closes the runspace pool.
 // Transitions from Opened → Closing → (wait) → Closed.
 func (p *Pool) Close(ctx context.Context) error {
+	p.logf("[pool] Close called")
 	p.mu.Lock()
 	currentState := p.state
 

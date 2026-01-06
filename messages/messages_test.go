@@ -377,6 +377,22 @@ func TestMessageHelpers(t *testing.T) {
 			wantRPID:   rpID,
 			wantPID:    pID,
 		},
+		{
+			name: "NewGetAvailableRunspaces",
+			createFunc: func() *Message {
+				msg := NewGetAvailableRunspaces(rpID, 12345)
+				// Verify it's a Complex Object with ci property per MS-PSRP 2.2.2.6
+				expected := `<Obj RefId="0"><MS><I64 N="ci">12345</I64></MS></Obj>`
+				if string(msg.Data) != expected {
+					panic(fmt.Sprintf("unexpected data: %s", msg.Data))
+				}
+				return msg
+			},
+			wantType: MessageTypeGetAvailableRunspaces,
+			wantDest: DestinationServer,
+			wantRPID: rpID,
+			wantPID:  uuid.Nil,
+		},
 	}
 
 	for _, tt := range tests {

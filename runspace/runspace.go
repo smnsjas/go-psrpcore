@@ -52,6 +52,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -473,7 +474,8 @@ func (p *Pool) Connect(ctx context.Context) error {
 		return ErrAlreadyOpen
 	}
 	p.state = StateConnecting
-	p.ctx = ctx
+	// NOTE: Do NOT overwrite p.ctx here. The pool's lifecycle context (created in NewWithContext)
+	// must remain intact for the dispatch loop. The passed ctx is only for the connect handshake.
 	p.mu.Unlock()
 
 	// 1. Start message dispatch loop
@@ -498,7 +500,8 @@ func (p *Pool) Connect(ctx context.Context) error {
 		// 4. Wait for state to be Opened
 		// Since dispatchLoop is running, we wait for state transition via channel
 		// We add a timeout because some transports (HvSocket) might just hang if session doesn't exist.
-		timeout := time.After(30 * time.Second)
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
 
 		for {
 			p.mu.RLock()
@@ -520,7 +523,7 @@ func (p *Pool) Connect(ctx context.Context) error {
 				if newState == StateBroken || newState == StateClosed {
 					return ErrBroken
 				}
-			case <-timeout:
+			case <-timer.C:
 				return fmt.Errorf("connection timed out waiting for RUNSPACEPOOL_STATE (server might not support session persistence)")
 			case <-ctx.Done():
 				return ctx.Err()
@@ -716,11 +719,14 @@ func (p *Pool) Close(ctx context.Context) error {
 	// the server often doesn't ack cleanly, and we don't want to make the user wait.
 	// The backend.Close() will handle the actual resource cleanup (socket close/process kill).
 	p.logf("[pool] Waiting for server Clean close (timeout 100ms)...")
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+
 	select {
 	case <-p.doneCh:
 		// Clean exit triggered by server response
 		p.logInfo("[pool] Server acknowledged close (Clean)")
-	case <-time.After(100 * time.Millisecond):
+	case <-timer.C:
 		// Timeout - force clean up locally
 		p.logWarn("[pool] Timeout waiting for server close")
 		p.cleanup(StateClosed, nil)
@@ -1146,10 +1152,10 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 
 			// Check for transient errors that shouldn't break the pool
 			// EOF can happen when there's no more data but pool is still valid
-			errStr := err.Error()
-			if strings.Contains(errStr, "EOF") ||
-				strings.Contains(errStr, "timeout") ||
-				strings.Contains(errStr, "context canceled") {
+			if errors.Is(err, io.EOF) ||
+				errors.Is(err, context.Canceled) ||
+				errors.Is(err, context.DeadlineExceeded) ||
+				isTimeoutError(err) {
 				p.logWarn("[dispatch] transient error: %v", err)
 				// Check if we should continue or exit
 				p.mu.RLock()
@@ -1173,8 +1179,8 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 					return
 				}
 
-				// If error is "closed networking", preventing loop.
-				if strings.Contains(err.Error(), "closed network connection") {
+				// If error is "closed network connection", prevent loop.
+				if isClosedNetworkError(err) {
 					return
 				}
 
@@ -1771,4 +1777,24 @@ func (p *Pool) logError(format string, v ...interface{}) {
 	if slogger != nil {
 		slogger.Error(fmt.Sprintf(format, v...))
 	}
+}
+
+// isTimeoutError checks if the error is a network timeout.
+func isTimeoutError(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// isClosedNetworkError checks if the error indicates a closed connection.
+func isClosedNetworkError(err error) bool {
+	// Check for common closed connection error patterns via net.OpError
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		// Check the inner error for "use of closed" message
+		if opErr.Err != nil && strings.Contains(opErr.Err.Error(), "use of closed") {
+			return true
+		}
+	}
+	// Fallback: also check for the string pattern in case error is wrapped differently
+	return strings.Contains(err.Error(), "closed network connection")
 }

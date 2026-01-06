@@ -393,6 +393,26 @@ func NewGetCommandMetadata(runspaceID uuid.UUID, data []byte) *Message {
 	}
 }
 
+// NewGetAvailableRunspaces creates a GET_AVAILABLE_RUNSPACES message.
+// This message queries the server for the number of available runspaces.
+// Reference: MS-PSRP Section 2.2.2.6
+// callID is an arbitrary request identifier (typically increments).
+func NewGetAvailableRunspaces(runspaceID uuid.UUID, callID int64) *Message {
+	// Per MS-PSRP 2.2.2.6, the Data field is a Complex Object with an
+	// extended property "ci" (Call ID) of type Signed long (I64).
+	// The Complex Object has no associated type names.
+	// Format: <Obj RefId="0"><MS><I64 N="ci">N</I64></MS></Obj>
+	data := []byte(fmt.Sprintf(`<Obj RefId="0"><MS><I64 N="ci">%d</I64></MS></Obj>`, callID))
+
+	return &Message{
+		Destination: DestinationServer,
+		Type:        MessageTypeGetAvailableRunspaces,
+		RunspaceID:  runspaceID,
+		PipelineID:  uuid.Nil,
+		Data:        data,
+	}
+}
+
 // PipelineState represents the state of a pipeline.
 // These values correspond to the PSInvocationState enum defined in MS-PSRP Section 2.2.3.9.
 type PipelineState int32

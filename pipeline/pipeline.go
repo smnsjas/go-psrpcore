@@ -635,10 +635,13 @@ func (p *Pipeline) sendToChannel(
 	timeout := p.channelTimeout
 	p.mu.RUnlock()
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case ch <- msg:
 		return nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return fmt.Errorf("%w: %s channel timeout after %v", ErrBufferFull, name, timeout)
 	case <-p.ctx.Done():
 		return p.ctx.Err()
@@ -667,10 +670,13 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		timeout := p.channelTimeout
 		p.mu.RUnlock()
 
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
 		select {
 		case p.outputCh <- msg:
 			return nil
-		case <-time.After(timeout):
+		case <-timer.C:
 			return fmt.Errorf("%w: output channel timeout after %v", ErrBufferFull, timeout)
 		case <-p.ctx.Done():
 			return p.ctx.Err()
@@ -689,10 +695,13 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		timeout := p.channelTimeout
 		p.mu.RUnlock()
 
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
 		select {
 		case p.errorCh <- msg:
 			return nil
-		case <-time.After(timeout):
+		case <-timer.C:
 			return fmt.Errorf("%w: error channel timeout after %v", ErrBufferFull, timeout)
 		case <-p.ctx.Done():
 			return p.ctx.Err()

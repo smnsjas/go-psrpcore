@@ -181,6 +181,11 @@ type Pool struct {
 	negotiatedMaxRunspaces int
 	negotiatedMinRunspaces int
 
+	// Availability monitoring
+	availabilityMu     sync.RWMutex
+	availableRunspaces int
+	availabilityCh     chan int
+
 	// Host callback handling
 	host                host.Host
 	hostCallbackHandler *host.CallbackHandler
@@ -911,6 +916,27 @@ func (p *Pool) GetCommandMetadata(ctx context.Context, names []string) ([]*objec
 	}
 }
 
+// SendGetAvailableRunspaces sends a GET_AVAILABLE_RUNSPACES query.
+func (p *Pool) SendGetAvailableRunspaces(ctx context.Context) error {
+	p.mu.RLock()
+	if p.state != StateOpened {
+		p.mu.RUnlock()
+		return ErrNotOpen
+	}
+	p.mu.RUnlock()
+
+	// Use arbitrary CallID 1
+	msg := messages.NewGetAvailableRunspaces(p.id, 1)
+	return p.sendMessage(ctx, msg)
+}
+
+// AvailableRunspaces returns the last known count of available runspaces.
+func (p *Pool) AvailableRunspaces() int {
+	p.availabilityMu.RLock()
+	defer p.availabilityMu.RUnlock()
+	return p.availableRunspaces
+}
+
 // parseCommandMetadata parses the CLIXML command metadata from a GET_COMMAND_METADATA_REPLY message.
 func parseCommandMetadata(data []byte) ([]*objects.CommandMetadata, error) {
 	deser := serialization.NewDeserializer()
@@ -1225,6 +1251,30 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 				p.mu.Lock()
 				p.setState(StateOpened)
 				p.mu.Unlock()
+			}
+
+		case messages.MessageTypeRunspaceAvailability:
+			// Parse availability data
+			count, err := parseRunspaceAvailability(msg.Data)
+			if err == nil {
+				p.availabilityMu.Lock()
+				p.availableRunspaces = count
+				p.availabilityMu.Unlock()
+
+				p.logf("Runspace availability update: %d", count)
+
+				// Notify listener if any
+				// We do a non-blocking send to avoid holding up the dispatch loop
+				p.availabilityMu.RLock()
+				if p.availabilityCh != nil {
+					select {
+					case p.availabilityCh <- count:
+					default:
+					}
+				}
+				p.availabilityMu.RUnlock()
+			} else {
+				p.logWarn("Failed to parse availability: %v", err)
 			}
 		}
 	}
@@ -1633,6 +1683,45 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 	}
 
 	return info, nil
+}
+
+// parseRunspaceAvailability parses RUNSPACE_AVAILABILITY message data.
+func parseRunspaceAvailability(data []byte) (int, error) {
+	// The payload is a Long (int64) representing the number of available runspaces.
+	// Example: <Obj RefId="0"><I64>1</I64></Obj>
+	// Or sometimes just <I64>1</I64> depending on serialization depth?
+	// Usually it's a CLIXML object.
+
+	deser := serialization.NewDeserializer()
+	objs, err := deser.Deserialize(data)
+	if err != nil {
+		return 0, fmt.Errorf("deserialize availability: %w", err)
+	}
+
+	if len(objs) == 0 {
+		return 0, fmt.Errorf("no availability object")
+	}
+
+	// It should be an int64 (I64) or int or PSObject with value
+	switch v := objs[0].(type) {
+	case int64:
+		return int(v), nil
+	case int32:
+		return int(v), nil
+	case int:
+		return v, nil
+	case *serialization.PSObject:
+		// Sometimes wrapped
+		if val, ok := v.Value.(int64); ok {
+			return int(val), nil
+		}
+		if val, ok := v.Value.(int32); ok {
+			return int(val), nil
+		}
+		return 0, fmt.Errorf("PSObject base is not int: %T", v.Value)
+	default:
+		return 0, fmt.Errorf("unexpected type for availability: %T", objs[0])
+	}
 }
 
 // logf logs a debug message if a logger is configured.

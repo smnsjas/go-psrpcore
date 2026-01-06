@@ -31,6 +31,7 @@ Your Application
 - **Object serialization** - CLIXML encode/decode for PowerShell objects
 - **SecureString support** - Encrypted credential handling
 - **Streaming output** - Progress, Debug, Verbose, Warning, Error, Information records
+- **Availability Monitoring** - Tracks available runspaces on the server via `RUNSPACE_AVAILABILITY` messages
 
 ## Installation
 

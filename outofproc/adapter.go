@@ -30,6 +30,9 @@ type Adapter struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// Lifecycle signaling
+	readLoopDone chan struct{} // Closed when readLoop exits
+
 	// Callbacks for non-data packets (protected by handlerMu)
 	handlerMu    sync.RWMutex
 	onCommandAck func(pipelineGUID uuid.UUID)
@@ -54,6 +57,7 @@ func NewAdapterWithContext(
 		notifyCh:     make(chan struct{}, 1),
 		ctx:          adapterCtx,
 		cancel:       cancel,
+		readLoopDone: make(chan struct{}),
 	}
 
 	// Start background reader
@@ -93,6 +97,7 @@ func (a *Adapter) SetSignalAckHandler(handler func(psGuid uuid.UUID)) {
 // readLoop reads packets from the transport and dispatches them.
 func (a *Adapter) readLoop() {
 	defer func() {
+		close(a.readLoopDone) // Signal that readLoop has exited
 		a.readMu.Lock()
 		a.closed = true
 
@@ -288,15 +293,18 @@ func (a *Adapter) SendSignal(pipelineGUID uuid.UUID) error {
 // This matches the behavior of "killing" the client, which we observed
 // successfully clears the server state.
 func (a *Adapter) Close() error {
-	// 1. Give server a moment to process the PSRP close (which happened in Pool.Close)
-	time.Sleep(200 * time.Millisecond)
-
-	// 2. Just cancel the context to stop readLoop and release resources.
+	// Cancel the context to signal readLoop to stop.
 	// We rely on the subsequent socket close (in backend) to signal EOF to server.
 	a.cancel()
 
-	// 3. Brief wait for readLoop to exit
-	time.Sleep(100 * time.Millisecond)
+	// Wait for readLoop to exit with a fallback timeout.
+	// This replaces the fixed sleeps with a deterministic signal-based approach.
+	select {
+	case <-a.readLoopDone:
+		// readLoop exited cleanly
+	case <-time.After(300 * time.Millisecond):
+		// Fallback timeout for stubborn connections (e.g., vmicvmsession quirks)
+	}
 
 	return nil
 }

@@ -63,3 +63,7 @@ test/profiles/
 # Vscode workspace file
 .vscode/
 .code-workspace
+
+# CodeQL
+codeql-db/
+*.sarif

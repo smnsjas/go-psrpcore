@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,8 +117,9 @@ type Pipeline struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// channelTimeout is the timeout for channel send operations when buffer is full.
-	channelTimeout time.Duration
+	// channelTimeout is the timeout (in nanoseconds) for channel send operations when buffer is full.
+	// Accessed via atomic operations.
+	channelTimeout atomic.Int64
 
 	// skipInvokeSend prevents Invoke from sending the CreatePipeline message.
 	// Used when the data was already sent via another mechanism (e.g., WSMan Command Arguments).
@@ -189,25 +191,25 @@ func NewWithContext(
 
 	pipelineCtx, cancel := context.WithCancel(ctx)
 	p := &Pipeline{
-		id:             uuid.New(),
-		runspaceID:     runspaceID,
-		state:          StateNotStarted,
-		transport:      transport,
-		powerShell:     ps,
-		outputCh:       make(chan *messages.Message, 100), // Buffered to prevent blocking
-		errorCh:        make(chan *messages.Message, 100),
-		warningCh:      make(chan *messages.Message, 100),
-		verboseCh:      make(chan *messages.Message, 100),
-		debugCh:        make(chan *messages.Message, 100),
-		progressCh:     make(chan *messages.Message, 100),
-		informationCh:  make(chan *messages.Message, 100),
-		doneCh:         make(chan struct{}),
-		ctx:            pipelineCtx,
-		cancel:         cancel,
-		channelTimeout: DefaultChannelTimeout,
+		id:            uuid.New(),
+		runspaceID:    runspaceID,
+		state:         StateNotStarted,
+		transport:     transport,
+		powerShell:    ps,
+		outputCh:      make(chan *messages.Message, 100), // Buffered to prevent blocking
+		errorCh:       make(chan *messages.Message, 100),
+		warningCh:     make(chan *messages.Message, 100),
+		verboseCh:     make(chan *messages.Message, 100),
+		debugCh:       make(chan *messages.Message, 100),
+		progressCh:    make(chan *messages.Message, 100),
+		informationCh: make(chan *messages.Message, 100),
+		doneCh:        make(chan struct{}),
+		ctx:           pipelineCtx,
+		cancel:        cancel,
 	}
 	// Default to NoInput=true for scripts (Execute semantics).
 	// Callers that want to stream input should use NewBuilder or explicitly set NoInput=false.
+	p.channelTimeout.Store(int64(DefaultChannelTimeout))
 	p.powerShell.NoInput = true
 	return p
 }
@@ -228,23 +230,23 @@ func NewWithID(transport Transport, runspaceID, pipelineID uuid.UUID) *Pipeline 
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Pipeline{
-		id:             pipelineID,
-		runspaceID:     runspaceID,
-		state:          StateRunning, // Assume running or ready to receive
-		transport:      transport,
-		powerShell:     ps,
-		outputCh:       make(chan *messages.Message, 100),
-		errorCh:        make(chan *messages.Message, 100),
-		warningCh:      make(chan *messages.Message, 100),
-		verboseCh:      make(chan *messages.Message, 100),
-		debugCh:        make(chan *messages.Message, 100),
-		progressCh:     make(chan *messages.Message, 100),
-		informationCh:  make(chan *messages.Message, 100),
-		doneCh:         make(chan struct{}),
-		ctx:            ctx,
-		cancel:         cancel,
-		channelTimeout: DefaultChannelTimeout,
+		id:            pipelineID,
+		runspaceID:    runspaceID,
+		state:         StateRunning, // Assume running or ready to receive
+		transport:     transport,
+		powerShell:    ps,
+		outputCh:      make(chan *messages.Message, 100),
+		errorCh:       make(chan *messages.Message, 100),
+		warningCh:     make(chan *messages.Message, 100),
+		verboseCh:     make(chan *messages.Message, 100),
+		debugCh:       make(chan *messages.Message, 100),
+		progressCh:    make(chan *messages.Message, 100),
+		informationCh: make(chan *messages.Message, 100),
+		doneCh:        make(chan struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
+	p.channelTimeout.Store(int64(DefaultChannelTimeout))
 	return p
 }
 
@@ -253,23 +255,23 @@ func NewWithID(transport Transport, runspaceID, pipelineID uuid.UUID) *Pipeline 
 func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Pipeline{
-		id:             uuid.New(),
-		runspaceID:     runspaceID,
-		state:          StateNotStarted,
-		transport:      transport,
-		powerShell:     objects.NewPowerShell(),
-		outputCh:       make(chan *messages.Message, 100),
-		errorCh:        make(chan *messages.Message, 100),
-		warningCh:      make(chan *messages.Message, 100),
-		verboseCh:      make(chan *messages.Message, 100),
-		debugCh:        make(chan *messages.Message, 100),
-		progressCh:     make(chan *messages.Message, 100),
-		informationCh:  make(chan *messages.Message, 100),
-		doneCh:         make(chan struct{}),
-		ctx:            ctx,
-		cancel:         cancel,
-		channelTimeout: DefaultChannelTimeout,
+		id:            uuid.New(),
+		runspaceID:    runspaceID,
+		state:         StateNotStarted,
+		transport:     transport,
+		powerShell:    objects.NewPowerShell(),
+		outputCh:      make(chan *messages.Message, 100),
+		errorCh:       make(chan *messages.Message, 100),
+		warningCh:     make(chan *messages.Message, 100),
+		verboseCh:     make(chan *messages.Message, 100),
+		debugCh:       make(chan *messages.Message, 100),
+		progressCh:    make(chan *messages.Message, 100),
+		informationCh: make(chan *messages.Message, 100),
+		doneCh:        make(chan struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
+	p.channelTimeout.Store(int64(DefaultChannelTimeout))
 	// Default to NoInput=true for now (matches existing client behavior assumption)
 	p.powerShell.NoInput = true
 	return p
@@ -443,9 +445,7 @@ func (p *Pipeline) AddArgument(value interface{}) *Pipeline {
 // The default is DefaultChannelTimeout (5 seconds).
 // Setting a longer timeout allows for slower consumers, while a shorter timeout provides faster failure detection.
 func (p *Pipeline) SetChannelTimeout(timeout time.Duration) *Pipeline {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.channelTimeout = timeout
+	p.channelTimeout.Store(int64(timeout))
 	return p
 }
 
@@ -631,9 +631,7 @@ func (p *Pipeline) sendToChannel(
 	}
 
 	// Buffer full - block with timeout for back-pressure
-	p.mu.RLock()
-	timeout := p.channelTimeout
-	p.mu.RUnlock()
+	timeout := time.Duration(p.channelTimeout.Load())
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -666,9 +664,7 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		}
 
 		// Buffer full - block with timeout for back-pressure
-		p.mu.RLock()
-		timeout := p.channelTimeout
-		p.mu.RUnlock()
+		timeout := time.Duration(p.channelTimeout.Load())
 
 		timer := time.NewTimer(timeout)
 		defer timer.Stop()
@@ -691,9 +687,7 @@ func (p *Pipeline) HandleMessage(msg *messages.Message) error {
 		}
 
 		// Buffer full - block with timeout for back-pressure
-		p.mu.RLock()
-		timeout := p.channelTimeout
-		p.mu.RUnlock()
+		timeout := time.Duration(p.channelTimeout.Load())
 
 		timer := time.NewTimer(timeout)
 		defer timer.Stop()

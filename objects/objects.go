@@ -324,9 +324,10 @@ type Command struct {
 // PowerShell represents a pipeline of commands to be executed.
 // This structure corresponds to the serialized object graph sent in CREATE_PIPELINE.
 type PowerShell struct {
-	Commands                         []Command
-	IsNested                         bool      `xml:"IsNested"`
-	NoInput                          bool      `xml:"NoInput"` // If true, the client MUST NOT send any input (MS-PSRP 2.2.2.10)
+	Commands []Command
+	IsNested bool `xml:"IsNested"`
+	// NoInput: If true, the client MUST NOT send any input (MS-PSRP 2.2.2.10)
+	NoInput                          bool      `xml:"NoInput"`
 	ApartmentState                   int       `xml:"ApartmentState"`
 	RemoteStreamOptions              int       `xml:"RemoteStreamOptions"`
 	AddToHistory                     bool      `xml:"AddToHistory"`

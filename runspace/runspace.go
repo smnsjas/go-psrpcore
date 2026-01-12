@@ -524,7 +524,9 @@ func (p *Pool) Connect(ctx context.Context) error {
 					return ErrBroken
 				}
 			case <-timer.C:
-				return fmt.Errorf("connection timed out waiting for RUNSPACEPOOL_STATE (server might not support session persistence)")
+				return fmt.Errorf(
+					"connection timed out waiting for RUNSPACEPOOL_STATE " +
+						"(server might not support session persistence)")
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-p.doneCh:
@@ -586,7 +588,7 @@ func (p *Pool) AdoptPipeline(pl *pipeline.Pipeline) error {
 // GetActivePipelineIDs returns the list of IDs for all currently tracked pipelines.
 func (p *Pool) GetActivePipelineIDs() []uuid.UUID {
 	var ids []uuid.UUID
-	p.pipelines.Range(func(key, value interface{}) bool {
+	p.pipelines.Range(func(key, _ interface{}) bool {
 		if id, ok := key.(uuid.UUID); ok {
 			ids = append(ids, id)
 		}

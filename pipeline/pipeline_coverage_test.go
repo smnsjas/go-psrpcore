@@ -114,7 +114,7 @@ func TestSetChannelTimeout(t *testing.T) {
 	timeout := 5 * time.Second
 	p.SetChannelTimeout(timeout)
 
-	if p.channelTimeout != timeout {
-		t.Errorf("Expected timeout %v, got %v", timeout, p.channelTimeout)
+	if time.Duration(p.channelTimeout.Load()) != timeout {
+		t.Errorf("Expected timeout %v, got %v", timeout, time.Duration(p.channelTimeout.Load()))
 	}
 }

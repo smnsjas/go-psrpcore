@@ -595,6 +595,15 @@ func (p *Pool) GetActivePipelineIDs() []uuid.UUID {
 	return ids
 }
 
+// SetTransport updates the underlying transport for the RunspacePool.
+// This is used during reconnection scenarios where the physical connection (e.g. socket)
+// has been re-established and needs to be swapped in before PSRP reconnection handshake.
+func (p *Pool) SetTransport(t io.ReadWriter) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.transport = t
+}
+
 // ProcessConnectResponse processes the PSRP response data from WSManConnectShellEx.
 // This data contains the server's response to our SESSION_CAPABILITY and CONNECT_RUNSPACEPOOL
 // messages that were piggybacked in the Connect request.
@@ -1218,6 +1227,21 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 
 		// Runspace-level messages
 		switch msg.Type {
+		case messages.MessageTypeSessionCapability:
+			// Handle capability response during reconnection
+			caps, err := parseCapabilityData(msg.Data)
+			if err != nil {
+				p.logWarn("[dispatch] Failed to parse capability data: %v", err)
+				continue
+			}
+			p.logf("[dispatch] Received SESSION_CAPABILITY: ProtocolVersion=%s, PSVersion=%s",
+				caps.ProtocolVersion, caps.PSVersion)
+
+			p.mu.Lock()
+			p.serverProtocolVersion = caps.ProtocolVersion
+			p.serverPSVersion = caps.PSVersion
+			p.mu.Unlock()
+
 		case messages.MessageTypeRunspaceHostCall:
 			// Dispatch host call in background to not block loop
 			// Use limiter to prevent unbounded goroutine growth
@@ -1262,26 +1286,29 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 		case messages.MessageTypeRunspaceAvailability:
 			// Parse availability data
 			count, err := parseRunspaceAvailability(msg.Data)
-			if err == nil {
-				p.availabilityMu.Lock()
-				p.availableRunspaces = count
-				p.availabilityMu.Unlock()
-
-				p.logf("Runspace availability update: %d", count)
-
-				// Notify listener if any
-				// We do a non-blocking send to avoid holding up the dispatch loop
-				p.availabilityMu.RLock()
-				if p.availabilityCh != nil {
-					select {
-					case p.availabilityCh <- count:
-					default:
-					}
-				}
-				p.availabilityMu.RUnlock()
-			} else {
+			if err != nil {
 				p.logWarn("Failed to parse availability: %v", err)
+				continue
 			}
+
+			p.availabilityMu.Lock()
+			p.availableRunspaces = count
+			p.availabilityMu.Unlock()
+
+			if count > 0 {
+				p.logf("Runspace availability update: %d", count)
+			}
+
+			// Notify listener if any
+			// We do a non-blocking send to avoid holding up the dispatch loop
+			p.availabilityMu.RLock()
+			if p.availabilityCh != nil {
+				select {
+				case p.availabilityCh <- count:
+				default:
+				}
+			}
+			p.availabilityMu.RUnlock()
 		}
 	}
 }
@@ -1693,10 +1720,10 @@ func parseRunspacePoolState(data []byte) (*runspacePoolStateInfo, error) {
 
 // parseRunspaceAvailability parses RUNSPACE_AVAILABILITY message data.
 func parseRunspaceAvailability(data []byte) (int, error) {
-	// The payload is a Long (int64) representing the number of available runspaces.
+	// The payload is typically a Long (int64) representing the number of available runspaces.
 	// Example: <Obj RefId="0"><I64>1</I64></Obj>
-	// Or sometimes just <I64>1</I64> depending on serialization depth?
-	// Usually it's a CLIXML object.
+	// However, HvSocket may return a PSObject without a base value (Value=nil).
+	// In that case, we treat it as "availability unknown" and return 0.
 
 	deser := serialization.NewDeserializer()
 	objs, err := deser.Deserialize(data)
@@ -1705,7 +1732,8 @@ func parseRunspaceAvailability(data []byte) (int, error) {
 	}
 
 	if len(objs) == 0 {
-		return 0, fmt.Errorf("no availability object")
+		// Empty response - treat as unknown availability
+		return 0, nil
 	}
 
 	// It should be an int64 (I64) or int or PSObject with value
@@ -1717,14 +1745,44 @@ func parseRunspaceAvailability(data []byte) (int, error) {
 	case int:
 		return v, nil
 	case *serialization.PSObject:
-		// Sometimes wrapped
+		// Try Value first (standard case)
 		if val, ok := v.Value.(int64); ok {
 			return int(val), nil
 		}
 		if val, ok := v.Value.(int32); ok {
 			return int(val), nil
 		}
-		return 0, fmt.Errorf("PSObject base is not int: %T", v.Value)
+		if val, ok := v.Value.(int); ok {
+			return val, nil
+		}
+
+		// Try Properties (some servers put it here)
+		if v.Properties != nil {
+			// Check common property names
+			for _, propName := range []string{"SetMinMaxRunspacesResponse", "ci", "Count", "Availability"} {
+				if propVal, exists := v.Properties[propName]; exists {
+					switch pv := propVal.(type) {
+					case int64:
+						return int(pv), nil
+					case int32:
+						return int(pv), nil
+					case int:
+						return pv, nil
+					}
+				}
+			}
+		}
+
+		// Value is nil and no recognizable properties - this is normal for HvSocket keepalive ack
+		// Return 0 (unknown) without error - it's simply an acknowledgment
+		if v.Value == nil {
+			return 0, nil
+		}
+
+		return 0, fmt.Errorf("PSObject value is unexpected type: %T", v.Value)
+	case nil:
+		// Nil object - treat as unknown
+		return 0, nil
 	default:
 		return 0, fmt.Errorf("unexpected type for availability: %T", objs[0])
 	}

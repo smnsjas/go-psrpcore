@@ -43,6 +43,28 @@ func BenchmarkSerializeSmallObject(b *testing.B) {
 	}
 }
 
+func BenchmarkSerializeUnsafeSmallObject(b *testing.B) {
+	obj := &serialization.PSObject{
+		TypeNames: []string{"System.String"},
+		Properties: map[string]interface{}{
+			"Value": "test",
+		},
+	}
+
+	ser := serialization.NewSerializer()
+	defer ser.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := ser.SerializeUnsafe(obj)
+		if err != nil {
+			b.Fatal(err)
+		}
+		// SerializeUnsafe resets buffer internally at start
+	}
+}
+
 func BenchmarkSerializeMediumObject(b *testing.B) {
 	obj := &serialization.PSObject{
 		TypeNames:  []string{"System.Management.Automation.PSCustomObject"},

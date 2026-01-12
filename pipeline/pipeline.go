@@ -133,17 +133,6 @@ func (p *Pipeline) SetSlogLogger(logger *slog.Logger) {
 	p.slogLogger = logger.With("component", "pipeline", "pipeline_id", p.id, "runspace_id", p.runspaceID)
 }
 
-// logf logs a debug message if a logger is configured.
-func (p *Pipeline) logf(format string, v ...interface{}) {
-	p.mu.RLock()
-	logger := p.slogLogger
-	p.mu.RUnlock()
-
-	if logger != nil {
-		logger.Debug(fmt.Sprintf(format, v...))
-	}
-}
-
 // logInfo logs an informational message (normal operations).
 func (p *Pipeline) logInfo(format string, v ...interface{}) {
 	p.mu.RLock()
@@ -152,28 +141,6 @@ func (p *Pipeline) logInfo(format string, v ...interface{}) {
 
 	if logger != nil {
 		logger.Info(fmt.Sprintf(format, v...))
-	}
-}
-
-// logWarn logs a warning message (potential issues, recoverable).
-func (p *Pipeline) logWarn(format string, v ...interface{}) {
-	p.mu.RLock()
-	logger := p.slogLogger
-	p.mu.RUnlock()
-
-	if logger != nil {
-		logger.Warn(fmt.Sprintf(format, v...))
-	}
-}
-
-// logError logs an error message (failures that affect function).
-func (p *Pipeline) logError(format string, v ...interface{}) {
-	p.mu.RLock()
-	logger := p.slogLogger
-	p.mu.RUnlock()
-
-	if logger != nil {
-		logger.Error(fmt.Sprintf(format, v...))
 	}
 }
 

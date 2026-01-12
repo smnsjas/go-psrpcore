@@ -5,7 +5,16 @@
 		},
 		{
 			"path": "../go-psrp"
+		},
+		{
+			"path": "../go-ntlm-cbt"
+		},
+		{
+			"name": "Quick Queries",
+			"path": "../../Library/Application Support/Antigravity/User/workspaceStorage/6998be8adf5b51c85eae781faedfaf01/GitHub.vscode-codeql/quick-queries"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"codeQL.createQuery.qlPackLocation": "/Users/jasonsimons/Projects/go-psrp"
+	}
 }

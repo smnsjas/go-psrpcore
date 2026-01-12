@@ -32,6 +32,7 @@ Your Application
 - **SecureString support** - Encrypted credential handling
 - **Streaming output** - Progress, Debug, Verbose, Warning, Error, Information records
 - **Availability Monitoring** - Tracks available runspaces on the server via `RUNSPACE_AVAILABILITY` messages
+- **Dynamic Transport Swap** - `SetTransport()` allows replacing the underlying transport for reconnection scenarios
 
 ## Installation
 

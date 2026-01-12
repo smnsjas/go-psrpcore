@@ -274,6 +274,27 @@ func (s *Serializer) Serialize(v interface{}) ([]byte, error) {
 	return append([]byte(nil), s.buf.Bytes()...), nil
 }
 
+// SerializeUnsafe converts a Go value to CLIXML bytes WITHOUT allocating a copy.
+//
+// WARNING: The returned slice is valid ONLY until the next call to Serialize/Reset/Close
+// on this Serializer. The caller must NOT retain the slice or modify it.
+// This is intended for zero-allocation scenarios where the data is immediately consumed
+// (e.g., written to a network socket or copied to another buffer).
+func (s *Serializer) SerializeUnsafe(v interface{}) ([]byte, error) {
+	s.buf.Reset()
+
+	// Write root Objs element
+	s.buf.WriteString(`<Objs Version="` + CLIXMLVersion + `" xmlns="` + CLIXMLNamespace + `">`)
+
+	if err := s.serializeValue(v); err != nil {
+		return nil, fmt.Errorf("serialize value: %w", err)
+	}
+
+	s.buf.WriteString("</Objs>")
+
+	return s.buf.Bytes(), nil
+}
+
 // SerializeRaw converts a Go value to CLIXML bytes WITHOUT the <Objs> wrapper.
 // This is used for PSRP message payloads which expect raw serialized objects.
 // Per MS-PSRP, message data contains serialized objects directly, not wrapped in <Objs>.
@@ -285,6 +306,20 @@ func (s *Serializer) SerializeRaw(v interface{}) ([]byte, error) {
 	}
 
 	return append([]byte(nil), s.buf.Bytes()...), nil
+}
+
+// SerializeRawUnsafe converts a Go value to CLIXML bytes WITHOUT the <Objs> wrapper and WITHOUT allocating a copy.
+//
+// WARNING: The returned slice is valid ONLY until the next call to Serialize/Reset/Close
+// on this Serializer. The caller must NOT retain the slice or modify it.
+func (s *Serializer) SerializeRawUnsafe(v interface{}) ([]byte, error) {
+	s.buf.Reset()
+
+	if err := s.serializeValue(v); err != nil {
+		return nil, fmt.Errorf("serialize value: %w", err)
+	}
+
+	return s.buf.Bytes(), nil
 }
 
 // SerializeMultipleRaw serializes multiple values WITHOUT the <Objs> wrapper.

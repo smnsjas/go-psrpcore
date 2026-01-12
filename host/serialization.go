@@ -38,6 +38,7 @@ func EncodeRemoteHostCall(call *RemoteHostCall) ([]byte, error) {
 
 	// Serialize to CLIXML
 	ser := serialization.NewSerializer()
+	defer ser.Close()
 	return ser.Serialize(obj)
 }
 
@@ -145,6 +146,7 @@ func EncodeRemoteHostResponse(response *RemoteHostResponse) ([]byte, error) {
 
 	// Serialize to CLIXML
 	ser := serialization.NewSerializer()
+	defer ser.Close()
 	return ser.Serialize(obj)
 }
 

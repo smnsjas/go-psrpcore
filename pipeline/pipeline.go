@@ -456,7 +456,9 @@ func (p *Pipeline) Invoke(ctx context.Context) error {
 	// Serialize the PowerShell object to CLIXML
 	serializer := serialization.NewSerializer()
 	defer serializer.Close()
-	cmdData, err := serializer.SerializeRaw(p.powerShell)
+	// Use Unsafe variant because we immediately consume the data in NewCreatePipeline -> SendMessage
+	// which copies it into the message buffer before this function returns (and serializer closes).
+	cmdData, err := serializer.SerializeRawUnsafe(p.powerShell)
 	if err != nil {
 		p.transition(StateFailed, err)
 		return fmt.Errorf("serialize command: %w", err)
@@ -503,7 +505,8 @@ func (p *Pipeline) SendInput(ctx context.Context, data interface{}) error {
 
 	serializer := serialization.NewSerializer()
 	defer serializer.Close()
-	xmlData, err := serializer.SerializeRaw(data)
+	// Use Unsafe variant as data is copied in NewPipelineInput -> SendMessage
+	xmlData, err := serializer.SerializeRawUnsafe(data)
 	if err != nil {
 		return fmt.Errorf("serialize input: %w", err)
 	}

@@ -8,7 +8,8 @@ Pure Go implementation of the PowerShell Remoting Protocol (PSRP).
 
 ## Overview
 
-This library implements the [MS-PSRP](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/) protocol following the **sans-IO** pattern. It handles PSRP protocol logic only—consumers provide their own transport layer.
+This library implements the [MS-PSRP](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/)
+protocol following the **sans-IO** pattern. It handles PSRP protocol logic only—consumers provide their own transport layer.
 
 ```
 Your Application
@@ -121,6 +122,7 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 
 ### PSRP Protocol Layers
 
+<!-- markdownlint-disable MD013 -->
 ```
 ┌─────────────────────────────────────────┐
 │           PowerShell API                │  High-level commands
@@ -136,6 +138,7 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 │        Serialization Layer              │  CLIXML encode/decode
 └─────────────────────────────────────────┘
 ```
+<!-- markdownlint-enable MD013 -->
 
 ## Design & Performance
 
@@ -177,7 +180,8 @@ This library uses a **Sans-IO** design, making it easy to test without a live Po
 
 ### Functional Tests
 
-We provide a comprehensive functional test suite that simulates a PSRP server over a mock transport. This verifies the complete handshake and execution flow.
+We provide a comprehensive functional test suite that simulates a PSRP server over
+a mock transport. This verifies the complete handshake and execution flow.
 
 ```bash
 go test -v ./runspace -run TestEndToEndFunctional
@@ -238,4 +242,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgements
 
-This library references the [pypsrp](https://github.com/jborean93/pypsrp) and [psrpcore](https://github.com/jborean93/psrpcore) projects by [Jordan Borean](https://github.com/jborean93). These implementations served as the primary reference for the protocol logic.
+This library references the [pypsrp](https://github.com/jborean93/pypsrp) and
+[psrpcore](https://github.com/jborean93/psrpcore) projects by
+[Jordan Borean](https://github.com/jborean93). These implementations served as
+the primary reference for the protocol logic.

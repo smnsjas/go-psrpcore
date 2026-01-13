@@ -89,6 +89,11 @@ type Logger interface {
 	Printf(format string, v ...interface{})
 }
 
+// SecurityEventCallback is a function that receives security-relevant events.
+// event: The type of event (e.g., "session_lifecycle")
+// details: Map of event details
+type SecurityEventCallback func(event string, details map[string]any)
+
 // MultiplexedTransport represents a transport that can send data on different streams/channels.
 // This is used by OutOfProcess transport (SSH) to separate session data from command data.
 type MultiplexedTransport interface {
@@ -194,6 +199,9 @@ type Pool struct {
 	// Debug logging
 	logger     Logger
 	slogLogger *slog.Logger
+
+	// Security logging (NIST SP 800-92)
+	securityCallback SecurityEventCallback
 
 	// Metadata
 	metadataCh chan *messages.Message
@@ -564,6 +572,16 @@ func (p *Pool) ResumeOpened() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.state = StateOpened
+	// Security logging: Session Established
+	p.emitSecurityEventLocked("session_lifecycle", map[string]any{
+		"subtype":       "open",
+		"outcome":       "success",
+		"pool_id":       p.id.String(),
+		"protocol_ver":  p.serverProtocolVersion,
+		"ps_version":    p.serverPSVersion,
+		"max_runspaces": p.negotiatedMaxRunspaces,
+	})
+	p.logger.Printf("RunspacePool %s opened successfully", p.id)
 }
 
 // AdoptPipeline registers an existing pipeline with the runspace pool.
@@ -1282,6 +1300,16 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			case messages.RunspacePoolStateOpened:
 				p.mu.Lock()
 				p.setState(StateOpened)
+				// Security logging: Session Established
+				p.emitSecurityEventLocked("session_lifecycle", map[string]any{
+					"subtype":       "open",
+					"outcome":       "success",
+					"pool_id":       p.id.String(),
+					"protocol_ver":  p.serverProtocolVersion,
+					"ps_version":    p.serverPSVersion,
+					"max_runspaces": p.negotiatedMaxRunspaces,
+				})
+				p.logger.Printf("RunspacePool %s opened successfully", p.id)
 				p.mu.Unlock()
 			}
 
@@ -1337,6 +1365,24 @@ func (p *Pool) cleanup(endState State, err error) {
 
 		// Transition to end state
 		p.setState(endState)
+
+		// Security logging: Session Ended
+		if endState == StateBroken {
+			errStr := "unknown error"
+			if err != nil {
+				errStr = err.Error()
+			}
+			p.emitSecurityEventLocked("session_lifecycle", map[string]any{
+				"subtype": "failed",
+				"outcome": "failure",
+				"error":   errStr,
+			})
+		} else if endState == StateClosed {
+			p.emitSecurityEventLocked("session_lifecycle", map[string]any{
+				"subtype": "closed",
+				"outcome": "success",
+			})
+		}
 
 		// Close all pipeline channels by transitioning them to failed state
 		// (For clean close, they should already be done, but safety check)

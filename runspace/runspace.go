@@ -395,6 +395,56 @@ func (p *Pool) SetMaxRunspaces(maxVal int) error {
 	return nil
 }
 
+// WaitForAvailability waits until at least minRunspaces are available in the pool.
+// It returns immediately if the condition is already met.
+// Returns an error if the context is canceled or the pool is not open.
+func (p *Pool) WaitForAvailability(ctx context.Context, minRunspaces int) error {
+	// Fast path: check if already satisfied
+	p.availabilityMu.RLock()
+	current := p.availableRunspaces
+	ch := p.availabilityCh
+	p.availabilityMu.RUnlock()
+
+	if current >= minRunspaces {
+		return nil
+	}
+
+	// Slow path: wait for updates
+	p.availabilityMu.Lock()
+	// Re-check under write lock
+	if p.availableRunspaces >= minRunspaces {
+		p.availabilityMu.Unlock()
+		return nil
+	}
+
+	// Ensure channel exists
+	if p.availabilityCh == nil {
+		p.availabilityCh = make(chan int)
+	}
+	ch = p.availabilityCh
+	p.availabilityMu.Unlock()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case count := <-ch:
+			// Note: We receive the new count from the channel.
+			// We don't need to lock to read it here.
+			if count >= minRunspaces {
+				return nil
+			}
+		case <-time.After(10 * time.Millisecond): // Small poll backup just in case
+			p.availabilityMu.RLock()
+			count := p.availableRunspaces
+			p.availabilityMu.RUnlock()
+			if count >= minRunspaces {
+				return nil
+			}
+		}
+	}
+}
+
 // Open opens the runspace pool by performing the capability exchange and initialization.
 //
 // The opening sequence:

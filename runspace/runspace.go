@@ -188,9 +188,10 @@ type Pool struct {
 	negotiatedMinRunspaces int
 
 	// Availability monitoring
-	availabilityMu     sync.RWMutex
-	availableRunspaces int
-	availabilityCh     chan int
+	availabilityMu          sync.RWMutex
+	availableRunspaces      int
+	availabilityCh          chan int
+	receivedAvailabilityMsg bool // Tracks if server sends RUNSPACE_AVAILABILITY messages
 
 	// Host callback handling
 	host                host.Host
@@ -402,7 +403,6 @@ func (p *Pool) WaitForAvailability(ctx context.Context, minRunspaces int) error 
 	// Fast path: check if already satisfied
 	p.availabilityMu.RLock()
 	current := p.availableRunspaces
-	ch := p.availabilityCh
 	p.availabilityMu.RUnlock()
 
 	// Fail fast if pool not ready
@@ -412,8 +412,11 @@ func (p *Pool) WaitForAvailability(ctx context.Context, minRunspaces int) error 
 	}
 
 	if current >= minRunspaces {
+		p.logf("[WaitForAvailability] Fast path satisfied: have %d, need %d", current, minRunspaces)
 		return nil
 	}
+
+	p.logf("[WaitForAvailability] Slow path: have %d, need %d (waiting...)", current, minRunspaces)
 
 	// Slow path: wait for updates
 	p.availabilityMu.Lock()
@@ -427,12 +430,13 @@ func (p *Pool) WaitForAvailability(ctx context.Context, minRunspaces int) error 
 	if p.availabilityCh == nil {
 		p.availabilityCh = make(chan int)
 	}
-	ch = p.availabilityCh
+	ch := p.availabilityCh
 	p.availabilityMu.Unlock()
 
 	for {
 		select {
 		case <-ctx.Done():
+			p.logf("[WaitForAvailability] Context cancelled/timed out: %v", ctx.Err())
 			return ctx.Err()
 		case count := <-ch:
 			// Note: We receive the new count from the channel.
@@ -469,6 +473,22 @@ func (p *Pool) RunspaceUtilization() (available, total int) {
 	p.availabilityMu.RUnlock()
 
 	return available, total
+}
+
+// InitializeAvailabilityIfNeeded initializes availability to MaxRunspaces
+// if the server hasn't sent any RUNSPACE_AVAILABILITY messages yet.
+// This should be called after giving the server adequate time to send messages.
+func (p *Pool) InitializeAvailabilityIfNeeded() {
+	p.availabilityMu.Lock()
+	defer p.availabilityMu.Unlock()
+
+	if !p.receivedAvailabilityMsg {
+		// Server doesn't send RUNSPACE_AVAILABILITY - assume full availability
+		p.mu.RLock()
+		p.availableRunspaces = p.maxRunspaces
+		p.mu.RUnlock()
+		p.logf("Server doesn't send RUNSPACE_AVAILABILITY - assuming %d available", p.availableRunspaces)
+	}
 }
 
 // Open opens the runspace pool by performing the capability exchange and initialization.
@@ -624,6 +644,21 @@ func (p *Pool) Connect(ctx context.Context) error {
 	p.mu.Lock()
 	p.setState(StateOpened)
 	p.mu.Unlock()
+
+	// Initialize availability for servers that don't send RUNSPACE_AVAILABILITY
+	// Give server a moment to send it
+	time.Sleep(200 * time.Millisecond)
+
+	p.availabilityMu.Lock()
+	if !p.receivedAvailabilityMsg {
+		// Server doesn't send RUNSPACE_AVAILABILITY - assume full availability
+		p.mu.RLock()
+		p.availableRunspaces = p.maxRunspaces
+		p.mu.RUnlock()
+		p.logf("Server doesn't send RUNSPACE_AVAILABILITY - assuming %d available", p.availableRunspaces)
+	}
+	p.availabilityMu.Unlock()
+
 	return nil
 }
 
@@ -1398,12 +1433,15 @@ func (p *Pool) dispatchLoop(ctx context.Context) {
 			}
 
 			p.availabilityMu.Lock()
+			// Mark that this server DOES send RUNSPACE_AVAILABILITY messages
+			if !p.receivedAvailabilityMsg {
+				p.logf("Server supports RUNSPACE_AVAILABILITY messages")
+				p.receivedAvailabilityMsg = true
+			}
 			p.availableRunspaces = count
 			p.availabilityMu.Unlock()
 
-			if count > 0 {
-				p.logf("Runspace availability update: %d", count)
-			}
+			p.logf("Runspace availability update: %d", count)
 
 			// Notify listener if any
 			// We do a non-blocking send to avoid holding up the dispatch loop
@@ -1667,6 +1705,7 @@ func (p *Pool) receiveMessage(ctx context.Context) (*messages.Message, error) {
 			if err != nil {
 				return nil, fmt.Errorf("decode message: %w", err)
 			}
+
 			return msg, nil
 		}
 

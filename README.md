@@ -1,15 +1,20 @@
 # go-psrpcore
 
+<!-- markdownlint-disable MD013 -->
 [![Go Reference](https://pkg.go.dev/badge/github.com/smnsjas/go-psrpcore.svg)](https://pkg.go.dev/github.com/smnsjas/go-psrpcore)
 [![Go Report Card](https://goreportcard.com/badge/github.com/smnsjas/go-psrpcore)](https://goreportcard.com/report/github.com/smnsjas/go-psrpcore)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<!-- markdownlint-enable MD013 -->
 
 Pure Go implementation of the PowerShell Remoting Protocol (PSRP).
 
 ## Overview
 
+<!-- markdownlint-disable MD013 -->
 This library implements the [MS-PSRP](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/)
-protocol following the **sans-IO** pattern. It handles PSRP protocol logic only—consumers provide their own transport layer.
+protocol following the **sans-IO** pattern. It handles PSRP protocol logic
+only—consumers provide their own transport layer.
+<!-- markdownlint-enable MD013 -->
 
 ```text
 Your Application
@@ -31,9 +36,12 @@ Your Application
 - **Full PSRP support** - RunspacePools, Pipelines, Host callbacks
 - **Object serialization** - CLIXML encode/decode for PowerShell objects
 - **SecureString support** - Encrypted credential handling
-- **Streaming output** - Progress, Debug, Verbose, Warning, Error, Information records
-- **Availability Monitoring** - Tracks available runspaces on the server via `RUNSPACE_AVAILABILITY` messages
-- **Dynamic Transport Swap** - `SetTransport()` allows replacing the underlying transport for reconnection scenarios
+- **Streaming output** - Progress, Debug, Verbose, Warning, Error,
+  Information records
+- **Availability Monitoring** - Tracks available runspaces on the server via
+  `RUNSPACE_AVAILABILITY` messages
+- **Dynamic Transport Swap** - `SetTransport()` allows replacing the underlying
+  transport for reconnection scenarios
 
 ## Installation
 
@@ -142,10 +150,13 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 
 ## Design & Performance
 
-We maintain detailed design documentation and performance analysis in the `docs/` directory:
+We maintain detailed design documentation and performance analysis in the
+`docs/` directory:
 
+<!-- markdownlint-disable MD013 -->
 - [Development Journey](docs/development-journey.md) - Lessons learned building the protocol
 - [Security Implementation Guide](docs/session-key-implementation-guide.md) - SecureString and encryption implementation details
+<!-- markdownlint-enable MD013 -->
 - [Performance Baselines](docs/BASELINE_PERFORMANCE.md) - Benchmark results
 
 See [docs/README.md](docs/README.md) for the full index.
@@ -176,12 +187,13 @@ See [docs/README.md](docs/README.md) for the full index.
 
 ## Testing
 
-This library uses a **Sans-IO** design, making it easy to test without a live PowerShell server.
+This library uses a **Sans-IO** design, making it easy to test without a live
+PowerShell server.
 
 ### Functional Tests
 
-We provide a comprehensive functional test suite that simulates a PSRP server over
-a mock transport. This verifies the complete handshake and execution flow.
+We provide a comprehensive functional test suite that simulates a PSRP server
+over a mock transport. This verifies the complete handshake and execution flow.
 
 ```bash
 go test -v ./runspace -run TestEndToEndFunctional
@@ -197,9 +209,11 @@ go test ./...
 
 ## Related Projects
 
+<!-- markdownlint-disable MD013 -->
 - [psrpcore](https://github.com/jborean93/psrpcore) - Python PSRP implementation (reference)
 - [pypsrp](https://github.com/jborean93/pypsrp) - Python PSRP client with WSMan transport
 - [go-psdirect](https://github.com/jasonmfehr/go-psdirect) - PowerShell Direct for Hyper-V (uses this library)
+<!-- markdownlint-enable MD013 -->
 
 ## Contributing
 

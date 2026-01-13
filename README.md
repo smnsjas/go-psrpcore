@@ -11,7 +11,7 @@ Pure Go implementation of the PowerShell Remoting Protocol (PSRP).
 This library implements the [MS-PSRP](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-psrp/)
 protocol following the **sans-IO** pattern. It handles PSRP protocol logic only—consumers provide their own transport layer.
 
-```
+```text
 Your Application
        │
        ▼
@@ -123,7 +123,7 @@ This library follows the [sans-IO](https://sans-io.readthedocs.io/) pattern:
 ### PSRP Protocol Layers
 
 <!-- markdownlint-disable MD013 -->
-```
+```text
 ┌─────────────────────────────────────────┐
 │           PowerShell API                │  High-level commands
 ├─────────────────────────────────────────┤

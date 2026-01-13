@@ -89,6 +89,11 @@ type Logger interface {
 	Printf(format string, v ...interface{})
 }
 
+// NoOpLogger is a logger that does nothing.
+type NoOpLogger struct{}
+
+func (l NoOpLogger) Printf(format string, v ...interface{}) {}
+
 // SecurityEventCallback is a function that receives security-relevant events.
 // event: The type of event (e.g., "session_lifecycle")
 // details: Map of event details
@@ -252,6 +257,7 @@ func NewWithContext(ctx context.Context, transport io.ReadWriter, id uuid.UUID) 
 		doneCh:              make(chan struct{}),
 		ctx:                 poolCtx,
 		cancel:              cancel,
+		logger:              NoOpLogger{}, // Initialize with no-op logger to prevent panic
 	}
 }
 

@@ -5,22 +5,26 @@ This package implements the PSRP RunspacePool state machine following the MS-PSR
 ## Features
 
 ### State Machine
+
 - **BeforeOpen** → **Opening** → **Opened** → **Closing** → **Closed**
 - Can transition to **Broken** from any state on error
 - Thread-safe state transitions with mutex protection
 - State validation on all operations
 
 ### Message Exchange
+
 - **SESSION_CAPABILITY**: Protocol version and capability negotiation
 - **INIT_RUNSPACEPOOL**: Pool initialization with min/max runspaces
 - **RUNSPACEPOOL_STATE**: State change notifications from server
 
 ### Configuration
+
 - Configurable minimum and maximum runspaces
 - Settings must be configured before opening the pool
 - Default: 1 min, 1 max runspaces
 
 ### Error Handling
+
 - `ErrInvalidState`: Operation not allowed in current state
 - `ErrAlreadyOpen`: Attempting to open already open pool
 - `ErrNotOpen`: Operation requires open pool
@@ -139,6 +143,7 @@ See the [host package README](../host/README.md) for details on implementing cus
 Current coverage: **85.5%**
 
 Tests cover:
+
 - State transitions and validation
 - Message exchange sequences
 - Error conditions
@@ -149,17 +154,21 @@ Tests cover:
 ## Implementation Details
 
 ### Sans-IO Pattern
+
 The implementation follows the sans-IO pattern:
+
 - No I/O logic in protocol code
 - Transport provided by consumer
 - Focuses purely on protocol state machine
 
 ### Message Fragmentation
+
 - Uses [fragments](../fragments) package for fragmentation/reassembly
 - Configurable max fragment size (default: 32KB)
 - Automatic message reassembly from fragments
 
 ### Thread Safety
+
 - All public methods are thread-safe
 - Internal mutex protects state transitions
 - Non-blocking state notifications via channels

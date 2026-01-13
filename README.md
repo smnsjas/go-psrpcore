@@ -97,7 +97,7 @@ func main() {
 This library is designed to be composed with transport implementations:
 
 | Transport | Use Case | Example Project |
-|-----------|----------|-----------------|
+| --------- | -------- | --------------- |
 | **AF_HYPERV / VMBus** | PowerShell Direct to Hyper-V VMs | [go-psrp](https://github.com/smnsjas/go-psrp) |
 | **WSMan / HTTP(S)** | Traditional WinRM remoting | [go-psrp](https://github.com/smnsjas/go-psrp) |
 | **SSH** | PowerShell Core remoting | Use `golang.org/x/crypto/ssh` |
@@ -105,7 +105,7 @@ This library is designed to be composed with transport implementations:
 
 ## Package Structure
 
-```
+```text
 go-psrpcore/
 ├── runspace/            # RunspacePool management
 ├── pipeline/            # Pipeline execution

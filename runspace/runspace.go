@@ -405,6 +405,12 @@ func (p *Pool) WaitForAvailability(ctx context.Context, minRunspaces int) error 
 	ch := p.availabilityCh
 	p.availabilityMu.RUnlock()
 
+	// Fail fast if pool not ready
+	state := p.State()
+	if state != StateOpened {
+		return fmt.Errorf("pool not opened (state: %s)", state)
+	}
+
 	if current >= minRunspaces {
 		return nil
 	}
@@ -443,6 +449,26 @@ func (p *Pool) WaitForAvailability(ctx context.Context, minRunspaces int) error 
 			}
 		}
 	}
+}
+
+// RunspaceUtilization returns current runspace usage statistics.
+// Returns (available, total) where:
+//   - available: number of idle runspaces ready for new pipelines
+//   - total: maximum runspaces configured for this pool
+func (p *Pool) RunspaceUtilization() (available, total int) {
+	p.mu.RLock()
+	total = p.negotiatedMaxRunspaces
+	if total == 0 {
+		// If not negotiated yet, use configured max
+		total = p.maxRunspaces
+	}
+	p.mu.RUnlock()
+
+	p.availabilityMu.RLock()
+	available = p.availableRunspaces
+	p.availabilityMu.RUnlock()
+
+	return available, total
 }
 
 // Open opens the runspace pool by performing the capability exchange and initialization.

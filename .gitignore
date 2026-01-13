@@ -67,3 +67,5 @@ test/profiles/
 # CodeQL
 codeql-db/
 *.sarif
+# Benchmark outputs
+bench*.txt

@@ -140,6 +140,54 @@ type EncryptionProvider interface {
 	Decrypt(data []byte) ([]byte, error)
 }
 
+// String returns the string representation of the PSObject.
+// It prioritizes the ToString field, then the Value (if present),
+// and finally attempts to extract Exception messages if it looks like an ErrorRecord.
+func (o *PSObject) String() string {
+	if o == nil {
+		return "<nil>"
+	}
+	if o.ToString != "" {
+		return o.ToString
+	}
+	if o.Value != nil {
+		return fmt.Sprintf("%v", o.Value)
+	}
+
+	// Try to extract Exception message for ErrorRecords
+	// ErrorRecords often have Exception property with Message
+	if exc, ok := o.Properties["Exception"]; ok {
+		if excObj, ok := exc.(*PSObject); ok {
+			if msg, ok := excObj.Properties["Message"]; ok {
+				return fmt.Sprintf("%v", msg)
+			}
+		}
+	}
+	// Fallback check for ExceptionAsErrorRecord
+	if exc, ok := o.Properties["ExceptionAsErrorRecord"]; ok {
+		if excObj, ok := exc.(*PSObject); ok {
+			// Often has "Exception" property inside
+			if innerExc, ok := excObj.Properties["Exception"]; ok {
+				if innerExcObj, ok := innerExc.(*PSObject); ok {
+					if msg, ok := innerExcObj.Properties["Message"]; ok {
+						return fmt.Sprintf("%v", msg)
+					}
+				}
+			}
+			// Or just ToString of the exception object
+			if excObj.ToString != "" {
+				return excObj.ToString
+			}
+		}
+	}
+
+	// Fallback to TypeNames
+	if len(o.TypeNames) > 0 {
+		return o.TypeNames[0]
+	}
+	return "PSObject"
+}
+
 // Serializer encodes Go values to CLIXML.
 type Serializer struct {
 	buf        bytes.Buffer
@@ -570,7 +618,10 @@ func (s *Serializer) serializeByteArrayFast(val []byte, name string) error {
 	} else {
 		s.buf.WriteString("<BA>")
 	}
-	s.buf.WriteString(base64.StdEncoding.EncodeToString(val))
+	// Use streaming encoder to avoid allocating a large string for base64
+	encoder := base64.NewEncoder(base64.StdEncoding, &s.buf)
+	encoder.Write(val)
+	encoder.Close()
 	s.buf.WriteString("</BA>")
 	return nil
 }

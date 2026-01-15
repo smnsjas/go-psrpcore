@@ -132,8 +132,9 @@ const (
 
 const (
 	// DefaultMaxFragmentSize is the default maximum size for PSRP message fragments.
-	// MS-PSRP recommends 32KB (32768 bytes) as a reasonable default.
-	DefaultMaxFragmentSize = 32768
+	// We use 300KB (307200) to maximize throughput.
+	// This fits comfortably within a 500KB WSMan envelope (standard on modern Windows) after Base64 encoding.
+	DefaultMaxFragmentSize = 307200
 
 	// DefaultMaxConcurrentHostCalls limits the number of concurrent host callback
 	// operations that can be processed. This prevents resource exhaustion under
@@ -1214,10 +1215,13 @@ func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
 		p.mu.RUnlock()
 		return nil, ErrNotOpen
 	}
-
+	logger := p.slogLogger
 	p.mu.RUnlock()
 
 	pl := pipeline.New(p, p.id, command)
+	if logger != nil {
+		pl.SetSlogLogger(logger)
+	}
 	p.pipelines.Store(pl.ID(), pl)
 
 	// If the transport supports MultiplexedTransport (e.g. OutOfProcess),
@@ -1255,10 +1259,13 @@ func (p *Pool) CreatePipelineBuilder() (*pipeline.Pipeline, error) {
 		p.mu.Unlock()
 		return nil, ErrNotOpen
 	}
-
+	logger := p.slogLogger
 	p.mu.Unlock()
 
 	pl := pipeline.NewBuilder(p, p.id)
+	if logger != nil {
+		pl.SetSlogLogger(logger)
+	}
 	p.pipelines.Store(pl.ID(), pl)
 
 	// If the transport supports MultiplexedTransport (e.g. OutOfProcess),

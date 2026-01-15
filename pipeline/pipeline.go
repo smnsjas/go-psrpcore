@@ -174,10 +174,7 @@ func NewWithContext(
 		ctx:           pipelineCtx,
 		cancel:        cancel,
 	}
-	// Default to NoInput=true for scripts (Execute semantics).
-	// Callers that want to stream input should use NewBuilder or explicitly set NoInput=false.
 	p.channelTimeout.Store(int64(DefaultChannelTimeout))
-	p.powerShell.NoInput = true
 	return p
 }
 
@@ -193,7 +190,6 @@ func New(transport Transport, runspaceID uuid.UUID, command string) *Pipeline {
 func NewWithID(transport Transport, runspaceID, pipelineID uuid.UUID) *Pipeline {
 	// Create with empty command since we are just recovering output
 	ps := objects.NewPowerShell()
-	ps.NoInput = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Pipeline{
@@ -239,8 +235,6 @@ func NewBuilder(transport Transport, runspaceID uuid.UUID) *Pipeline {
 		cancel:        cancel,
 	}
 	p.channelTimeout.Store(int64(DefaultChannelTimeout))
-	// Default to NoInput=true for now (matches existing client behavior assumption)
-	p.powerShell.NoInput = true
 	return p
 }
 
@@ -277,8 +271,8 @@ func (p *Pipeline) GetCreatePipelineData() ([]byte, error) {
 		return nil, fmt.Errorf("encode message: %w", err)
 	}
 
-	// Fragment the encoded message using 32KB max size (standard PSRP)
-	fragmenter := fragments.NewFragmenter(32768)
+	// Fragment the encoded message using 300KB max size (optimized for 500KB WSMan envelope)
+	fragmenter := fragments.NewFragmenter(307200)
 	frags, err := fragmenter.Fragment(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("fragment message: %w", err)

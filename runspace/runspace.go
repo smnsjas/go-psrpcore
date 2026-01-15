@@ -554,13 +554,17 @@ func (p *Pool) Open(ctx context.Context) error {
 			return fmt.Errorf("wait for opened: %w", err)
 		}
 	} else {
-		// When using creationXml, the server processes handshake synchronously
-		// and doesn't queue responses for Receive operations.
-		// Don't start dispatchLoop here - it will be started when CreatePipeline
-		// is called and the transport is properly configured.
-		p.mu.Lock()
-		p.setState(StateOpened)
-		p.mu.Unlock()
+		// When using creationXml (WSMan), the handshake messages are sent in the
+		// Create request. However, the server still queues its response messages
+		// (SESSION_CAPABILITY reply + RUNSPACEPOOL_STATE=Opened) for us to receive.
+		// We must wait for these messages before transitioning to Opened state.
+		if err := p.waitForOpened(ctx); err != nil {
+			p.setBroken()
+			return fmt.Errorf("wait for opened (creationXml flow): %w", err)
+		}
+		// Don't start dispatchLoop for WSMan - it uses per-request HTTP, not
+		// a continuous connection like HvSocket. Pipeline execution handles
+		// message receiving via its own transport.
 		return nil
 	}
 
@@ -1154,6 +1158,12 @@ func (p *Pool) waitForOpened(ctx context.Context) error {
 			// Server sent initialization data - store or log it, then continue waiting
 			// This contains application private data from the server
 			p.logf("Received RUNSPACEPOOL_INIT_DATA")
+			continue
+
+		case messages.MessageTypeSessionCapability:
+			// Server sent SESSION_CAPABILITY response - consume and continue waiting
+			// In creationXml flow, this is the server's reply to our capability message
+			p.logf("Received SESSION_CAPABILITY response")
 			continue
 
 		case messages.MessageTypeRunspacePoolState:

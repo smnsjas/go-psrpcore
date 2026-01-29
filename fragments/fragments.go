@@ -96,9 +96,9 @@ type Fragment struct {
 // Encode serializes the fragment to bytes.
 // All multi-byte fields use big-endian per MS-PSRP Section 2.2.4.
 func (f *Fragment) Encode() ([]byte, error) {
-	if len(f.Data) > math.MaxUint32 {
+	if uint64(len(f.Data)) > math.MaxUint32 {
 		return nil, fmt.Errorf("fragment data too large: %d bytes exceeds maximum of %d",
-			len(f.Data), math.MaxUint32)
+			len(f.Data), uint64(math.MaxUint32))
 	}
 
 	buf := make([]byte, HeaderSize+len(f.Data))

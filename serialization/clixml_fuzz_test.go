@@ -24,15 +24,21 @@ func FuzzRoundTripString(f *testing.F) {
 	f.Add("")
 	f.Add("<xml>stuff</xml>") // Special chars
 	f.Add("!@#$%^&*()")
+	f.Add("line1\r\nline2")       // Control chars (now CLIXML-encoded)
+	f.Add("\x00null\x01byte")     // C0 control chars
+	f.Add("_x000D_ literal")     // Underscore-x escape-escaping
+	f.Add("\U0001F600 emoji")     // Supplementary plane character
 
 	f.Fuzz(func(t *testing.T, s string) {
 		if !utf8.ValidString(s) {
 			return
 		}
-		// Filter out control characters that are invalid in XML 1.0
-		// XML 1.0 Allowed: #x9 | #xA | #xD | [#x20-#xD7FF] | ...
+		// With CLIXML encoding, control characters are encoded as _xHHHH_ before
+		// being placed in XML, so most characters now round-trip correctly.
+		// Only exclude U+FFFE and U+FFFF which are XML noncharacters that our
+		// CLIXML encoder doesn't handle (they're in the BMP, not control chars).
 		for _, r := range s {
-			if !isValidXMLChar(r) {
+			if r == 0xFFFE || r == 0xFFFF {
 				return
 			}
 		}
@@ -63,13 +69,6 @@ func FuzzRoundTripString(f *testing.F) {
 			t.Errorf("RoundTrip mismatch: got %q, want %q", got, s)
 		}
 	})
-}
-
-func isValidXMLChar(r rune) bool {
-	return r == 0x09 || r == 0x0A || r == 0x0D ||
-		(r >= 0x20 && r <= 0xD7FF) ||
-		(r >= 0xE000 && r <= 0xFFFD) ||
-		(r >= 0x10000 && r <= 0x10FFFF)
 }
 
 func FuzzRoundTripInt(f *testing.F) {

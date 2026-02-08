@@ -530,12 +530,15 @@ func (s *Serializer) serializeStringFast(val string, name string) error {
 	} else {
 		s.buf.WriteString("<S>")
 	}
+	// Encode control chars and escape-escape _x patterns as CLIXML _xHHHH_ sequences.
+	// This must happen before XML escaping since _xHHHH_ sequences are plain ASCII text.
+	encoded := encodeCLIXMLString(val)
 	// Fast path: if string has no special XML chars, write directly (no allocation)
-	if !needsXMLEscape(val) {
-		s.buf.WriteString(val)
+	if !needsXMLEscape(encoded) {
+		s.buf.WriteString(encoded)
 	} else {
-		// Slow path: escape special characters (allocates []byte)
-		if err := xml.EscapeText(&s.buf, []byte(val)); err != nil {
+		// Slow path: escape XML-special characters (<, >, &, ', ")
+		if err := xml.EscapeText(&s.buf, []byte(encoded)); err != nil {
 			return fmt.Errorf("escape string: %w", err)
 		}
 	}
@@ -1380,7 +1383,7 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
 			return nil, fmt.Errorf("decode string: %w", err)
 		}
-		return s, nil
+		return decodeCLIXMLString(s), nil
 
 	case "I32": // Int32
 		var s string

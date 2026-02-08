@@ -69,3 +69,6 @@ codeql-db/
 *.sarif
 # Benchmark outputs
 bench*.txt
+
+# Codex agent instructions
+AGENTS.md

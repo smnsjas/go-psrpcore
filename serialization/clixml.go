@@ -699,7 +699,7 @@ func (s *Serializer) serializeScriptBlockFast(val *objects.ScriptBlock, name str
 	} else {
 		s.buf.WriteString("<SB>")
 	}
-	if err := xml.EscapeText(&s.buf, []byte(val.Text)); err != nil {
+	if err := xml.EscapeText(&s.buf, []byte(encodeCLIXMLString(val.Text))); err != nil {
 		return fmt.Errorf("escape script block: %w", err)
 	}
 	s.buf.WriteString("</SB>")
@@ -745,7 +745,10 @@ func (s *Serializer) serializePSRPEnumFast(val *PSRPEnum, name string) error {
 	}
 
 	s.buf.WriteString("<ToString>")
-	s.buf.WriteString(val.ToString)
+	encoded := encodeCLIXMLString(val.ToString)
+	if err := xml.EscapeText(&s.buf, []byte(encoded)); err != nil {
+		return fmt.Errorf("escape enum tostring: %w", err)
+	}
 	s.buf.WriteString("</ToString>")
 
 	s.buf.WriteString("<I32>")
@@ -1086,7 +1089,7 @@ func (s *Serializer) serializePSObject(obj *PSObject, name string) error {
 	// Serialize ToString if present
 	if obj.ToString != "" {
 		s.buf.WriteString("<ToString>")
-		if err := xml.EscapeText(&s.buf, []byte(obj.ToString)); err != nil {
+		if err := xml.EscapeText(&s.buf, []byte(encodeCLIXMLString(obj.ToString))); err != nil {
 			return fmt.Errorf("escape tostring: %w", err)
 		}
 		s.buf.WriteString("</ToString>")
@@ -1491,7 +1494,7 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
 			return nil, fmt.Errorf("decode script block: %w", err)
 		}
-		return &objects.ScriptBlock{Text: s}, nil
+		return &objects.ScriptBlock{Text: decodeCLIXMLString(s)}, nil
 
 	case "Version": // Version (e.g. used in capabilities)
 		var s string
@@ -1699,7 +1702,7 @@ func (d *Deserializer) deserializeObject(se xml.StartElement) (interface{}, erro
 				if err := d.dec.DecodeElement(&s, &t); err != nil {
 					return nil, err
 				}
-				obj.ToString = s
+				obj.ToString = decodeCLIXMLString(s)
 
 			case "Props", "MS": // Properties or Member Set
 				props, err := d.deserializeProperties()

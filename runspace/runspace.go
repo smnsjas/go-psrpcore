@@ -1701,6 +1701,14 @@ func (p *Pool) receiveMessage(ctx context.Context) (*messages.Message, error) {
 		// Read blob data
 		// The blob length is at offset 17 in the header (big-endian)
 		blobLen := binary.BigEndian.Uint32(header[17:21])
+
+		// Guard against oversized blob lengths to prevent unbounded allocation (CWE-400).
+		// MS-PSRP fragments are typically well under 1 MB; 10 MB is a generous upper bound.
+		const maxFragmentBlobLen = 10 * 1024 * 1024 // 10 MB
+		if blobLen > maxFragmentBlobLen {
+			return nil, fmt.Errorf("fragment blob length %d exceeds maximum allowed size (%d)", blobLen, maxFragmentBlobLen)
+		}
+
 		fragData := make([]byte, fragments.HeaderSize+int(blobLen))
 		copy(fragData[:fragments.HeaderSize], header)
 

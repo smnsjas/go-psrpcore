@@ -106,6 +106,9 @@ type MultiplexedTransport interface {
 	SendCommand(id uuid.UUID) error
 	// SendPipelineData sends data associated with a specific pipeline.
 	SendPipelineData(id uuid.UUID, data []byte) error
+	// SendPipelineDataBatch sends multiple data slices for a pipeline in one
+	// transport operation (e.g. one HTTP POST with multiple <rsp:Stream> elements).
+	SendPipelineDataBatch(id uuid.UUID, dataSlices [][]byte) error
 }
 
 // State represents the current state of a RunspacePool.
@@ -1207,6 +1210,12 @@ func (p *Pool) SendMessage(ctx context.Context, msg *messages.Message) error {
 	return p.sendMessage(ctx, msg)
 }
 
+// SendMessages sends multiple PSRP messages, batching them into a single
+// transport operation when supported (implements pipeline.Transport).
+func (p *Pool) SendMessages(ctx context.Context, msgs []*messages.Message) error {
+	return p.sendMessages(ctx, msgs)
+}
+
 // CreatePipeline creates a new pipeline in the runspace pool.
 // Note: For creationXml flow, call StartDispatchLoop() after configuring the transport.
 func (p *Pool) CreatePipeline(command string) (*pipeline.Pipeline, error) {
@@ -1575,6 +1584,98 @@ func (p *Pool) sendMessage(ctx context.Context, msg *messages.Message) error {
 		// Fallback to standard Write (Session Data)
 		if _, err := p.transport.Write(fragData); err != nil {
 			return fmt.Errorf("write fragment: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// sendMessages sends multiple PSRP messages through the transport.
+// If the transport supports MultiplexedTransport with batch capability,
+// all fragments are collected and sent in a single batch operation
+// (e.g. one HTTP POST with multiple <rsp:Stream> elements).
+// Otherwise, messages are sent individually via sendMessage.
+func (p *Pool) sendMessages(ctx context.Context, msgs []*messages.Message) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	// Fast path: single message
+	if len(msgs) == 1 {
+		return p.sendMessage(ctx, msgs[0])
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Check if transport supports batching
+	mux, hasMux := p.transport.(MultiplexedTransport)
+
+	// All messages must target the same pipeline for batch dispatch
+	pipelineID := msgs[0].PipelineID
+	if hasMux && pipelineID != uuid.Nil {
+		// Collect all fragment data
+		var allFragData [][]byte
+		for _, msg := range msgs {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			frags, err := p.prepareMessage(msg)
+			if err != nil {
+				return err
+			}
+
+			for _, frag := range frags {
+				fragData, err := frag.Encode()
+				if err != nil {
+					return fmt.Errorf("encode fragment: %w", err)
+				}
+				allFragData = append(allFragData, fragData)
+			}
+		}
+
+		// Batch send all fragments
+		if err := mux.SendPipelineDataBatch(pipelineID, allFragData); err != nil {
+			return fmt.Errorf("write fragments (mux batch): %w", err)
+		}
+
+		return nil
+	}
+
+	// Fallback: send individually
+	for _, msg := range msgs {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		frags, err := p.prepareMessage(msg)
+		if err != nil {
+			return err
+		}
+
+		for _, frag := range frags {
+			fragData, err := frag.Encode()
+			if err != nil {
+				return fmt.Errorf("encode fragment: %w", err)
+			}
+
+			if msg.PipelineID != uuid.Nil {
+				if muxT, ok := p.transport.(MultiplexedTransport); ok {
+					if err := muxT.SendPipelineData(msg.PipelineID, fragData); err != nil {
+						return fmt.Errorf("write fragment (mux): %w", err)
+					}
+					continue
+				}
+			}
+
+			if _, err := p.transport.Write(fragData); err != nil {
+				return fmt.Errorf("write fragment: %w", err)
+			}
 		}
 	}
 

@@ -83,6 +83,7 @@ func (s State) String() string {
 // This is typically implemented by the RunspacePool.
 type Transport interface {
 	SendMessage(ctx context.Context, msg *messages.Message) error
+	SendMessages(ctx context.Context, msgs []*messages.Message) error
 	Host() host.Host
 }
 
@@ -508,6 +509,47 @@ func (p *Pipeline) SendInput(ctx context.Context, data interface{}) error {
 	msg := messages.NewPipelineInput(p.runspaceID, p.id, xmlData)
 	if err := p.transport.SendMessage(ctx, msg); err != nil {
 		return fmt.Errorf("send pipeline input: %w", err)
+	}
+
+	return nil
+}
+
+// SendInputBatch sends multiple input items to the running pipeline in a
+// single transport operation. Each item becomes a separate PIPELINE_INPUT
+// message per MS-PSRP 2.2.2.13, but all messages are batched into one
+// HTTP round trip via multiple <rsp:Stream> elements in the WSMan Send body.
+func (p *Pipeline) SendInputBatch(ctx context.Context, items []interface{}) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Fast path: single item delegates to SendInput
+	if len(items) == 1 {
+		return p.SendInput(ctx, items[0])
+	}
+
+	p.mu.Lock()
+	if p.state != StateRunning {
+		p.mu.Unlock()
+		return fmt.Errorf("%w: cannot send input to pipeline that is not running (state=%s)", ErrInvalidState, p.state)
+	}
+	p.mu.Unlock()
+
+	// Serialize each item individually into its own PIPELINE_INPUT message
+	msgs := make([]*messages.Message, 0, len(items))
+	for _, item := range items {
+		serializer := serialization.NewSerializer()
+		xmlData, err := serializer.SerializeRaw(item)
+		serializer.Close()
+		if err != nil {
+			return fmt.Errorf("serialize input: %w", err)
+		}
+
+		msgs = append(msgs, messages.NewPipelineInput(p.runspaceID, p.id, xmlData))
+	}
+
+	if err := p.transport.SendMessages(ctx, msgs); err != nil {
+		return fmt.Errorf("send pipeline input batch: %w", err)
 	}
 
 	return nil

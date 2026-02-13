@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,16 @@ func (m *mockTransport) SendMessage(_ context.Context, msg *messages.Message) er
 		return m.err
 	}
 	m.sent = append(m.sent, msg)
+	return nil
+}
+
+func (m *mockTransport) SendMessages(_ context.Context, msgs []*messages.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.sent = append(m.sent, msgs...)
 	return nil
 }
 
@@ -865,6 +876,144 @@ func TestPipeline_HandleMessage_HostCall(t *testing.T) {
 		lastMsg := sent[len(sent)-1]
 		if lastMsg.Type != messages.MessageTypePipelineHostResponse {
 			t.Errorf("expected PipelineHostResponse, got %v", lastMsg.Type)
+		}
+	}
+}
+
+// TestPipeline_SendInputBatch table-driven tests for batch input sending.
+func TestPipeline_SendInputBatch(t *testing.T) {
+	tests := []struct {
+		name         string
+		items        []interface{}
+		transportErr error
+		skipInvoke   bool // if true, don't invoke first (test wrong state)
+		expectError  bool
+		wantErrStr   string
+		wantMsgCount int
+	}{
+		{
+			name:         "empty_input_noop",
+			items:        nil,
+			wantMsgCount: 1, // only the CREATE_PIPELINE from Invoke
+		},
+		{
+			name:         "single_item",
+			items:        []interface{}{"hello"},
+			wantMsgCount: 2, // CREATE_PIPELINE + 1 PIPELINE_INPUT
+		},
+		{
+			name: "multiple_items",
+			items: []interface{}{
+				"item-1",
+				"item-2",
+				"item-3",
+			},
+			wantMsgCount: 4, // CREATE_PIPELINE + 3 PIPELINE_INPUT
+		},
+		{
+			name:         "not_running_state",
+			items:        []interface{}{"hello"},
+			skipInvoke:   true,
+			expectError:  true,
+			wantErrStr:   "not running",
+			wantMsgCount: 0,
+		},
+		{
+			name:         "transport_error",
+			items:        []interface{}{"hello"},
+			transportErr: errors.New("network failure"),
+			expectError:  true,
+			wantErrStr:   "network failure",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &mockTransport{}
+
+			runspaceID := uuid.New()
+			p := New(tr, runspaceID, "test-command")
+
+			if !tc.skipInvoke {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := p.Invoke(ctx); err != nil {
+					t.Fatalf("Invoke failed: %v", err)
+				}
+
+				// Set transport error after invoke succeeds
+				if tc.transportErr != nil {
+					tr.mu.Lock()
+					tr.err = tc.transportErr
+					tr.mu.Unlock()
+				}
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			err := p.SendInputBatch(ctx, tc.items)
+
+			if tc.expectError {
+				if err == nil {
+					t.Fatal("SendInputBatch() should have failed")
+				}
+				if tc.wantErrStr != "" && !strings.Contains(err.Error(), tc.wantErrStr) {
+					t.Errorf("error = %v, want substring %q", err, tc.wantErrStr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("SendInputBatch() error = %v", err)
+			}
+
+			sent := tr.GetSent()
+			if len(sent) != tc.wantMsgCount {
+				t.Errorf("messages sent = %d, want %d", len(sent), tc.wantMsgCount)
+			}
+
+			// Verify all batch messages are PIPELINE_INPUT type
+			for i := 1; i < len(sent); i++ {
+				if sent[i].Type != messages.MessageTypePipelineInput {
+					t.Errorf("message[%d] type = %v, want PipelineInput",
+						i, sent[i].Type)
+				}
+			}
+		})
+	}
+}
+
+// TestPipeline_SendInputBatch_PreservesOrder verifies that items are
+// sent in the same order they are provided, matching MS-PSRP requirements.
+func TestPipeline_SendInputBatch_PreservesOrder(t *testing.T) {
+	tr := &mockTransport{}
+	runspaceID := uuid.New()
+	p := New(tr, runspaceID, "test-command")
+
+	ctx := context.Background()
+	if err := p.Invoke(ctx); err != nil {
+		t.Fatalf("Invoke failed: %v", err)
+	}
+
+	items := []interface{}{"first", "second", "third", "fourth", "fifth"}
+	if err := p.SendInputBatch(ctx, items); err != nil {
+		t.Fatalf("SendInputBatch() error = %v", err)
+	}
+
+	sent := tr.GetSent()
+	// First message is CREATE_PIPELINE, remaining are PIPELINE_INPUT
+	inputMsgs := sent[1:]
+	if len(inputMsgs) != 5 {
+		t.Fatalf("got %d input messages, want 5", len(inputMsgs))
+	}
+
+	// Verify each message carries the correct pipeline ID and type
+	for i, msg := range inputMsgs {
+		if msg.Type != messages.MessageTypePipelineInput {
+			t.Errorf("message[%d] type = %v, want PipelineInput", i, msg.Type)
+		}
+		if msg.PipelineID != p.ID() {
+			t.Errorf("message[%d] pipelineID = %v, want %v", i, msg.PipelineID, p.ID())
 		}
 	}
 }

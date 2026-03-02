@@ -72,3 +72,8 @@ bench*.txt
 
 # Codex agent instructions
 AGENTS.md
+test-loop*
+psrp_out*
+compare_pypsrp.py
+diff.txt
+go-psrp-project-plan.md

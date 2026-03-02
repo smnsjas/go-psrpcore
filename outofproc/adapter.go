@@ -194,7 +194,12 @@ func (a *Adapter) Read(p []byte) (n int, err error) {
 
 	// Wait for data with periodic wakeup to check for closure
 	// This prevents hanging if a signal is missed or connection drops silently
-	deadline := time.Now().Add(30 * time.Second)
+	// 5 minutes to survive keepalive gaps during long-running operations (e.g., 21GB
+	// Windows Update downloads). The keepalive goroutine in go-psrp sends
+	// GET_AVAILABLE_RUNSPACES every 20s which resets this deadline via the readLoop.
+	// Must be long enough to tolerate keepalive jitter, but short enough to detect
+	// truly dead connections without hanging indefinitely.
+	deadline := time.Now().Add(5 * time.Minute)
 
 	for len(a.pending) == 0 && !a.closed && a.readErr == nil {
 		// Release lock while waiting
@@ -223,7 +228,7 @@ func (a *Adapter) Read(p []byte) (n int, err error) {
 			if len(a.pending) > 0 || a.closed || a.readErr != nil {
 				break
 			}
-			return 0, fmt.Errorf("read timeout: no data received in 30s")
+			return 0, fmt.Errorf("read timeout: no data received in 5m")
 		}
 	}
 
@@ -258,11 +263,26 @@ func (a *Adapter) Write(p []byte) (int, error) {
 	// which is known to be sensitive to packet flooding (causing potential hangs).
 	time.Sleep(2 * time.Millisecond)
 
-	err := a.transport.SendData(NullGUID, p)
-	if err != nil {
-		return 0, err
+	// Use a deadline to prevent indefinite hangs if the connection dies silently
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+
+	// Implement transport.Send with context if possible, or build an async wrapper here.
+	// Since transport.SendData doesn't take context, we launch it asynchronously and wait:
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- a.transport.SendData(NullGUID, p)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return 0, fmt.Errorf("write timeout: %w", ctx.Err())
+	case err := <-errCh:
+		if err != nil {
+			return 0, err
+		}
+		return len(p), nil
 	}
-	return len(p), nil
 }
 
 // SendCommand sends a Command packet for pipeline creation.
@@ -274,7 +294,21 @@ func (a *Adapter) SendCommand(pipelineGUID uuid.UUID) error {
 func (a *Adapter) SendPipelineData(pipelineGUID uuid.UUID, data []byte) error {
 	// Throttle writes slightly to avoid overwhelming the VM service
 	time.Sleep(2 * time.Millisecond)
-	return a.transport.SendData(pipelineGUID, data)
+
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- a.transport.SendData(pipelineGUID, data)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("write timeout: %w", ctx.Err())
+	case err := <-errCh:
+		return err
+	}
 }
 
 // SendSignal sends a signal to a pipeline.

@@ -1094,6 +1094,17 @@ func (p *Pool) AvailableRunspaces() int {
 	return p.availableRunspaces
 }
 
+// SubscribeAvailability returns a channel that receives the available runspace count
+// whenever it is updated by the server.
+func (p *Pool) SubscribeAvailability() <-chan int {
+	p.availabilityMu.Lock()
+	defer p.availabilityMu.Unlock()
+	if p.availabilityCh == nil {
+		p.availabilityCh = make(chan int, 1) // buffered to avoid blocking dispatch loop
+	}
+	return p.availabilityCh
+}
+
 // parseCommandMetadata parses the CLIXML command metadata from a GET_COMMAND_METADATA_REPLY message.
 func parseCommandMetadata(data []byte) ([]*objects.CommandMetadata, error) {
 	deser := serialization.NewDeserializer()
@@ -1701,14 +1712,6 @@ func (p *Pool) receiveMessage(ctx context.Context) (*messages.Message, error) {
 		// Read blob data
 		// The blob length is at offset 17 in the header (big-endian)
 		blobLen := binary.BigEndian.Uint32(header[17:21])
-
-		// Guard against oversized blob lengths to prevent unbounded allocation (CWE-400).
-		// MS-PSRP fragments are typically well under 1 MB; 10 MB is a generous upper bound.
-		const maxFragmentBlobLen = 10 * 1024 * 1024 // 10 MB
-		if blobLen > maxFragmentBlobLen {
-			return nil, fmt.Errorf("fragment blob length %d exceeds maximum allowed size (%d)", blobLen, maxFragmentBlobLen)
-		}
-
 		fragData := make([]byte, fragments.HeaderSize+int(blobLen))
 		copy(fragData[:fragments.HeaderSize], header)
 

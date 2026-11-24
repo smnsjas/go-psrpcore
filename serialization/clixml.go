@@ -1436,7 +1436,11 @@ func (d *Deserializer) deserializeElement(se xml.StartElement) (interface{}, err
 		if err := d.dec.DecodeElement(&s, &se); err != nil {
 			return nil, fmt.Errorf("decode datetime: %w", err)
 		}
-		return time.Parse(time.RFC3339Nano, s)
+		t, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			t, err = time.Parse("2006-01-02T15:04:05.999999999", s)
+		}
+		return t, err
 
 	case elemLST: // List
 		d.depth++

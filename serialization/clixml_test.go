@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/smnsjas/go-psrpcore/objects"
 )
@@ -143,6 +144,16 @@ func TestDeserializePrimitives(t *testing.T) {
 			name:     "nil",
 			clixml:   `<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Nil/></Objs>`,
 			expected: nil,
+		},
+		{
+			name:     "datetime with timezone",
+			clixml:   `<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><DT>2024-03-15T10:30:00Z</DT></Objs>`,
+			expected: time.Date(2024, 3, 15, 10, 30, 0, 0, time.UTC),
+		},
+		{
+			name:     "datetime without timezone",
+			clixml:   `<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><DT>0001-01-01T00:00:00</DT></Objs>`,
+			expected: time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 	}
 
